@@ -6,12 +6,14 @@ import os
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
+# ИМПОРТ ДЛЯ ИСПРАВЛЕНИЯ ОШИБКИ TypeError
+from aiogram.client.default import DefaultBotProperties 
 from dotenv import load_dotenv
 
 # --- КОНФИГУРАЦИЯ ---
 load_dotenv()
 API_TOKEN = os.getenv('BOT_TOKEN') 
-MANAGER_ID = os.getenv('MANAGER_ID') # Берем ID из .env
+MANAGER_ID = os.getenv('MANAGER_ID') # Берем ID менеджера из .env
 
 # Проверка обязательных переменных
 if not API_TOKEN:
@@ -19,7 +21,6 @@ if not API_TOKEN:
     exit(1)
 
 # Импорты наших модулей
-# Импортируем только CATALOG, так как MANAGER_ID берется из os.getenv()
 try:
     from keyboards import get_main_menu, get_models_keyboard
     from database import CATALOG 
@@ -33,8 +34,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logging.info("Bot configuration loaded successfully.")
 
 # Инициализация бота и диспетчера
-# Используем Markdown для форматирования сообщений
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.MARKDOWN) 
+# ИСПРАВЛЕННЫЙ СИНТАКСИС для aiogram 3.7.0+
+bot = Bot(
+    token=API_TOKEN, 
+    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN) # Новый способ передачи parse_mode
+) 
 dp = Dispatcher()
 
 
@@ -77,7 +81,7 @@ async def category_selection(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# 4. Обработка выбора конкретной модели (callback_data начинается с item_)
+# 4. Обработка выбора конкретной модели (callback_data начинается с item_) - ФУНКЦИЯ ЗАЯВКИ
 @dp.callback_query(F.data.startswith("item_"))
 async def item_selection(callback: types.CallbackQuery):
     """Регистрирует заявку и отправляет уведомление менеджеру."""
@@ -129,12 +133,10 @@ async def item_selection(callback: types.CallbackQuery):
 async def main():
     """Основная функция запуска бота."""
     logging.info("Starting bot polling...")
-    # Начинаем опрос Телеграм
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
-        # Запускаем асинхронную функцию
         asyncio.run(main())
     except KeyboardInterrupt:
         logging.warning("Bot stopped manually by user (Ctrl+C).")
