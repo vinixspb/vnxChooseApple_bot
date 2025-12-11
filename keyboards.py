@@ -1,27 +1,42 @@
+# keyboards.py
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database import CATALOG
 
 # Клавиатура категорий (iPhone, Mac, iPad)
-def get_main_menu():
+def get_main_menu() -> InlineKeyboardMarkup:
+    """Генерирует главное меню с категориями."""
     builder = InlineKeyboardBuilder()
+    
+    # Добавляем кнопки для каждой категории из CATALOG
     for key, value in CATALOG.items():
-        # key = 'iphones', value['label'] = '📱 iPhone'
+        # callback_data: cat_iphones, cat_macbooks, cat_ipads
         builder.button(text=value['label'], callback_data=f"cat_{key}")
-    builder.adjust(1) # 1 кнопка в ряд
+    
+    # Располагаем по 2 кнопки в ряд для компактности
+    builder.adjust(2) 
     return builder.as_markup()
 
 # Клавиатура моделей конкретной категории
-def get_models_keyboard(category_key):
+def get_models_keyboard(category_key: str) -> InlineKeyboardMarkup:
+    """Генерирует клавиатуру с моделями для выбранной категории."""
     builder = InlineKeyboardBuilder()
-    models = CATALOG[category_key]['models']
     
+    # Получаем список моделей по ключу
+    try:
+        models = CATALOG[category_key]['models']
+    except KeyError:
+        # Обработка, если категория не найдена
+        return get_main_menu()
+
     for model in models:
-        # callback_data должен быть коротким!
+        # callback_data: item_iPhone 15 Pro Max
         builder.button(text=model, callback_data=f"item_{model}")
     
-    # Кнопка "Назад"
-    builder.button(text="🔙 Назад", callback_data="back_to_main")
+    # Добавляем кнопку "Назад" в конце списка
+    builder.button(text="🔙 Назад к категориям", callback_data="back_to_main")
     
-    builder.adjust(2) # 2 кнопки в ряд
+    # Располагаем модели по 1 кнопке в ряд
+    builder.adjust(1)
     return builder.as_markup()
