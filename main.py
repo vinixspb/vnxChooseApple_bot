@@ -6,14 +6,13 @@ import os
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
-# ИМПОРТ ДЛЯ ИСПРАВЛЕНИЯ ОШИБКИ TypeError
 from aiogram.client.default import DefaultBotProperties 
 from dotenv import load_dotenv
 
-# --- КОНФИГУРАЦИЯ ---
+# --- КОНФИГУРАЦИЯ И ЗАГРУЗКА ---
 load_dotenv()
 API_TOKEN = os.getenv('BOT_TOKEN') 
-MANAGER_ID = os.getenv('MANAGER_ID') # Берем ID менеджера из .env
+MANAGER_ID = os.getenv('MANAGER_ID') 
 
 # Проверка обязательных переменных
 if not API_TOKEN:
@@ -21,11 +20,12 @@ if not API_TOKEN:
     exit(1)
 
 # Импорты наших модулей
+# Примечание: Убедитесь, что database.py и keyboards.py существуют
 try:
     from keyboards import get_main_menu, get_models_keyboard
     from database import CATALOG 
 except ImportError as e:
-    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте наличие и синтаксис файлов database.py и keyboards.py.")
+    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте наличие файлов.")
     exit(1)
 
 
@@ -34,27 +34,24 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logging.info("Bot configuration loaded successfully.")
 
 # Инициализация бота и диспетчера
-# ИСПРАВЛЕННЫЙ СИНТАКСИС для aiogram 3.7.0+
+# ИСПРАВЛЕННЫЙ БЛОК: Правильный синтаксис для aiogram 3.7.0+
 bot = Bot(
     token=API_TOKEN, 
-    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN) # Новый способ передачи parse_mode
+    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
 ) 
 dp = Dispatcher()
 
 
 # --- ХЕНДЛЕРЫ ---
 
-# 1. Команда /start
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     """Отправляет главное меню с категориями."""
-    logging.info(f"User {message.from_user.id} executed /start.")
     await message.answer(
         "👋 Добро пожаловать! Выберите категорию техники Apple:",
         reply_markup=get_main_menu()
     )
 
-# 2. Обработка кнопки "Назад"
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery):
     """Возвращает пользователя к главному меню категорий."""
@@ -64,13 +61,11 @@ async def back_to_main(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# 3. Обработка выбора категории (callback_data начинается с cat_)
 @dp.callback_query(F.data.startswith("cat_"))
 async def category_selection(callback: types.CallbackQuery):
     """Показывает список моделей в выбранной категории."""
-    cat_key = callback.data.split("_")[1] # Получаем ключ категории
+    cat_key = callback.data.split("_")[1]
     
-    # Проверка на существование категории в каталоге
     if cat_key not in CATALOG:
         await callback.answer("Категория не найдена.", show_alert=True)
         return
@@ -81,11 +76,9 @@ async def category_selection(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# 4. Обработка выбора конкретной модели (callback_data начинается с item_) - ФУНКЦИЯ ЗАЯВКИ
 @dp.callback_query(F.data.startswith("item_"))
 async def item_selection(callback: types.CallbackQuery):
     """Регистрирует заявку и отправляет уведомление менеджеру."""
-    # Получаем полное имя модели
     model_name = callback.data.split("item_")[1] 
     
     user = callback.from_user
@@ -113,7 +106,7 @@ async def item_selection(callback: types.CallbackQuery):
         f"[Написать клиенту](tg://user?id={user_id})"
     )
     
-    # 3. Отправляем уведомление менеджеру (если MANAGER_ID указан)
+    # 3. Отправляем уведомление менеджеру
     if MANAGER_ID:
         try:
             await bot.send_message(
@@ -124,14 +117,12 @@ async def item_selection(callback: types.CallbackQuery):
         except Exception as e:
             logging.error(f"Failed to send application to manager {MANAGER_ID}: {e}")
             
-    # Закрываем индикатор загрузки на кнопке
     await callback.answer(f"Заявка на {model_name} принята.")
 
 
 # --- ЗАПУСК БОТА ---
 
 async def main():
-    """Основная функция запуска бота."""
     logging.info("Starting bot polling...")
     await dp.start_polling(bot)
 
