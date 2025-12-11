@@ -23,38 +23,37 @@ if not API_TOKEN:
 
 # Импорты наших модулей
 try:
-    from keyboards import get_main_menu, get_dynamic_keyboard
-    # ИМПОРТ CATALOG УДАЛЕН. Вся структура будет загружаться из Sheets.
+    from keyboards import get_main_menu, get_dynamic_keyboard, get_models_keyboard
     from gsheets_api import get_data_from_sheet 
 except ImportError as e:
-    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте наличие gsheets_api.py и keyboards.py.")
+    # Эта ошибка теперь будет ловиться только при отсутствии файлов или необходимых библиотек (gspread)
+    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте наличие gsheets_api.py, keyboards.py и установку gspread.")
     exit(1)
 
 
 # --- FSM СОСТОЯНИЯ ---
-# Определяем этапы, которые проходит пользователь при выборе iPhone
 class IphoneSelection(StatesGroup):
-    choosing_model = State()     # Выбор Модели (iPhone 15 Pro Max)
-    choosing_memory = State()    # Выбор Памяти (256 GB)
-    choosing_color = State()     # Выбор Цвета (Black Titanium)
-    choosing_sim = State()       # Выбор SIM (eSIM)
+    choosing_model = State()     
+    choosing_memory = State()    
+    choosing_color = State()     
+    choosing_sim = State()       
 
 
-# --- КОНСТАНТЫ ---
+# --- КОНСТАНТЫ И КАТАЛОГ ---
+
 # Порядок и названия столбцов в Google Sheets, по которым идет выбор
 IPHONE_STAGES = ["Модель", "Память", "Цвет", "SIM"] 
 # Вся база данных iPhone будет храниться здесь после первого запроса
 IPHONE_CATALOG: List[Dict[str, Any]] = []
 
-# --- СТАТИЧЕСКИЙ КАТАЛОГ (ЗАМЕНИТЕ НА СВОЙ) ---
-# Это нужно, чтобы главное меню работало, пока мы не переведем все на Sheets
-# Так как мы удалили database.py, определяем структуру здесь.
-# В будущем вся эта структура должна быть заменена чтением из Sheets.
+# --- СТАТИЧЕСКИЙ КАТАЛОГ ДЛЯ ГЛАВНОГО МЕНЮ (ИСПРАВЛЕНО) ---
+# Этот словарь необходим для работы главного меню, пока не все категории переведены на Sheets.
+# Используется в get_main_menu() и в обработке ошибок.
 CATALOG = {
     "iphones": {"label": "📱 iPhone"},
-    "macbooks": {"label": "💻 MacBook", "models": ["MacBook Air M3"]}, # Старый статический список
-    "ipads": {"label": "📟 iPad", "models": ["iPad Pro M4"]},
-    "watches": {"label": "⌚ Apple Watch", "models": ["Watch Series 9"]}
+    "macbooks": {"label": "💻 MacBook", "models": ["MacBook Air M3", "MacBook Pro M3"]}, 
+    "ipads": {"label": "📟 iPad", "models": ["iPad Pro M4", "iPad Air M2"]},
+    "watches": {"label": "⌚ Apple Watch", "models": ["Watch Series 9", "Watch Ultra 2"]}
 }
 
 
@@ -70,7 +69,7 @@ bot = Bot(
 dp = Dispatcher()
 
 
-# --- ФУНКЦИИ ФИЛЬТРАЦИИ (Вспомогательная функция для выбора) ---
+# --- ФУНКЦИИ ФИЛЬТРАЦИИ ---
 
 def filter_catalog(current_filter: Dict[str, str]) -> List[Dict[str, Any]]:
     """Фильтрует каталог по заданным параметрам."""
@@ -88,7 +87,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "👋 Добро пожаловать! Выберите категорию техники Apple:",
-        reply_markup=get_main_menu(CATALOG) # Передаем сюда CATALOG
+        reply_markup=get_main_menu(CATALOG)
     )
 
 @dp.callback_query(F.data == "back_to_main")
@@ -97,7 +96,20 @@ async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text(
         "Выберите категорию техники Apple:",
-        reply_markup=get_main_menu(CATALOG) # Передаем сюда CATALOG
+        reply_markup=get_main_menu(CATALOG)
+    )
+    await callback.answer()
+
+# --- ХЕНДЛЕРЫ: ДРУГИЕ КАТЕГОРИИ (НЕ IPHONE) ---
+
+@dp.callback_query(F.data.startswith("cat_") & ~F.data.contains("iphones"))
+async def other_category_selection(callback: types.CallbackQuery):
+    """Обработка выбора для MacBook, iPad, Watch (старая, статическая логика)."""
+    cat_key = callback.data.split("_")[1]
+    
+    await callback.message.edit_text(
+        f"Вы выбрали **{CATALOG[cat_key]['label']}**.\nВыберите конкретную модель:",
+        reply_markup=get_models_keyboard(CATALOG, cat_key)
     )
     await callback.answer()
 
@@ -109,14 +121,18 @@ async def start_iphone_selection(callback: types.CallbackQuery, state: FSMContex
     """Начинает процесс выбора iPhone (первый этап - Модель)."""
     global IPHONE_CATALOG
     
-    await callback.answer("Загружаю каталог...", show_alert=False)
-
     # 1. Загружаем данные из Sheets только при первом обращении
     if not IPHONE_CATALOG:
+        await callback.answer("Загружаю каталог (это может занять несколько секунд)...", show_alert=False)
+        
+        logging.info("Attempting to load iPhone catalog from Google Sheets.")
         IPHONE_CATALOG = get_data_from_sheet("iPhone")
+        
         if not IPHONE_CATALOG:
+            # Сюда попадаем, если G-Sheets API вернул [] из-за ошибки (404, доступ, неверный ID)
+            logging.error("Failed to load iPhone catalog from Sheets.")
             await callback.message.edit_text(
-                "❌ Не удалось загрузить каталог iPhone. Проверьте настройки API и доступы к таблице.",
+                "❌ Не удалось загрузить каталог iPhone. Проверьте настройки API, ID таблицы и права доступа.",
                 reply_markup=get_main_menu(CATALOG)
             )
             return
@@ -136,11 +152,11 @@ async def start_iphone_selection(callback: types.CallbackQuery, state: FSMContex
         back_callback="back_to_main"
     )
     
+    # Редактируем сообщение с клавиатурой
     await callback.message.edit_text(
         f"Вы выбрали **iPhone**.\nВыберите модель:",
         reply_markup=keyboard
     )
-    await callback.answer()
 
 
 @dp.callback_query(IphoneSelection.choosing_model, F.data.startswith("val_"))
@@ -149,7 +165,7 @@ async def start_iphone_selection(callback: types.CallbackQuery, state: FSMContex
 @dp.callback_query(IphoneSelection.choosing_sim, F.data.startswith("val_"))
 async def process_iphone_selection(callback: types.CallbackQuery, state: FSMContext):
     """Обрабатывает выбор на каждом этапе (Модель, Память, Цвет, SIM)."""
-    await callback.answer() # Снимаем индикатор загрузки
+    await callback.answer()
     
     user_data = await state.get_data()
     current_filter = user_data.get('current_filter', {})
@@ -166,10 +182,9 @@ async def process_iphone_selection(callback: types.CallbackQuery, state: FSMCont
     current_filter[current_stage_name] = selected_value
     await state.update_data(current_filter=current_filter)
     
-    # 4. --- ПРОВЕРКА ЗАВЕРШЕНИЯ ---
+    # 4. --- ПРОВЕРКА ЗАВЕРШЕНИЯ (ПОСЛЕДНИЙ ЭТАП - SIM) ---
     if current_stage_index == len(IPHONE_STAGES) - 1:
         
-        # Находим конечный товар по всем 4 фильтрам
         final_items = filter_catalog(current_filter)
         
         if final_items:
@@ -177,7 +192,7 @@ async def process_iphone_selection(callback: types.CallbackQuery, state: FSMCont
             price = item_details.get("Цена", "Цена не указана")
             availability = item_details.get("Наличие", "Уточняется")
             
-            # 5. Регистрируем заявку
+            # 5. Регистрация заявки
             user = callback.from_user
             manager_message = (
                 "🔥 **НОВАЯ ЗАЯВКА НА IPHONE!**\n"
@@ -211,7 +226,6 @@ async def process_iphone_selection(callback: types.CallbackQuery, state: FSMCont
     next_unique_values = sorted(list(set(item.get(next_stage_name) for item in filtered_catalog if item.get(next_stage_name))))
     
     # 8. Переходим в следующее состояние FSM
-    # В реальном коде это можно сделать циклом, но для наглядности:
     if next_stage_name == "Память":
         await state.set_state(IphoneSelection.choosing_memory)
     elif next_stage_name == "Цвет":
