@@ -1,64 +1,76 @@
 # gsheets_api.py
 
-import gspread
-import logging
 import os
-import json # <<< НОВЫЙ ИМПОРТ
-from dotenv import load_dotenv
+import logging
+from typing import List, Dict, Any
+import gspread
+import json # <--- ДОБАВЬТЕ ЭТОТ ИМПОРТ
 
-load_dotenv()
+# ... (Остальной код, константы и прочее)
 
-# Имя переменной, содержащей JSON-ключ
-CREDENTIALS_JSON = os.getenv('GOOGLE_CREDENTIALS_JSON') 
-SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
+# --- ИСПРАВЛЕННАЯ ФУНКЦИЯ АВТОРИЗАЦИИ ---
+def authorize_gspread():
+    """Авторизация Gspread с использованием JSON-строки из переменной окружения."""
+    
+    # 1. Получаем JSON-строку из .env
+    credentials_json_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    
+    if not credentials_json_str:
+        logging.error("❌ Переменная GOOGLE_CREDENTIALS_JSON не найдена в .env.")
+        return None
 
-logging.basicConfig(level=logging.INFO)
-
-def get_data_from_sheet(sheet_name: str) -> list[dict]:
-    """
-    Подключается к Google Таблице с помощью JSON-ключа из переменной окружения
-    и считывает данные с указанного листа.
-    """
-    if not SPREADSHEET_ID:
-        logging.error("❌ SPREADSHEET_ID не указан в .env")
-        return []
-        
-    if not CREDENTIALS_JSON:
-        logging.error("❌ GOOGLE_CREDENTIALS_JSON не найдена в .env")
-        return []
-
+    # 2. Парсим JSON-строку в словарь
     try:
-        # 1. Загрузка учетных данных из переменной окружения
-        credentials_dict = json.loads(CREDENTIALS_JSON)
+        # json.loads обрабатывает длинную строку
+        credentials = json.loads(credentials_json_str) 
+    except json.JSONDecodeError as e:
+        # Эта ошибка происходит, если формат JSON нарушен (например, лишние кавычки, неправильные символы \n)
+        logging.error(f"❌ Ошибка парсинга JSON-ключа: {e}")
+        return None
+
+    # 3. Используем gspread.service_account_from_dict для авторизации
+    try:
+        gc = gspread.service_account_from_dict(credentials) 
+        return gc
+    except Exception as e:
+        logging.error(f"❌ Ошибка авторизации Gspread: {e}")
+        return None
+
+# --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
+def get_data_from_sheet(sheet_name: str) -> List[Dict[str, Any]]:
+    """Загружает данные с указанного листа."""
+    
+    # Авторизуемся
+    gc = authorize_gspread() # <--- ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ
+    
+    if gc is None:
+        return []
+
+    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    if not spreadsheet_id:
+        logging.error("❌ SPREADSHEET_ID не найден в .env.")
+        return []
         
-        # 2. Авторизация с помощью словаря учетных данных
-        gc = gspread.service_account_from_dict(credentials_dict)
+    try:
+        # Открываем таблицу по ID
+        spreadsheet = gc.open_by_key(spreadsheet_id)
         
-        # 3. Открытие таблицы по ID
-        spreadsheet = gc.open_by_key(SPREADSHEET_ID)
-        
-        # 4. Выбор листа (вкладки)
+        # Открываем лист по имени
         worksheet = spreadsheet.worksheet(sheet_name)
         
-        # 5. Получение всех записей
+        # Получаем данные в виде списка словарей
         data = worksheet.get_all_records()
-        
-        logging.info(f"✅ Успешно загружено {len(data)} записей из листа '{sheet_name}'.")
+        logging.info(f"✅ Loaded {len(data)} items from sheet '{sheet_name}'.")
         return data
 
-    except json.JSONDecodeError:
-        logging.error("❌ Ошибка парсинга JSON-ключа. Проверьте, что значение GOOGLE_CREDENTIALS_JSON корректно скопировано и находится в одной строке.")
     except gspread.exceptions.SpreadsheetNotFound:
-        logging.error(f"❌ Таблица с ID {SPREADSHEET_ID} не найдена или нет доступа. Проверьте ID и предоставьте доступ сервисному аккаунту.")
+        logging.error(f"❌ Таблица с ID {spreadsheet_id} не найдена или нет доступа.")
+        return []
     except gspread.exceptions.WorksheetNotFound:
-        logging.error(f"❌ Лист '{sheet_name}' не найден в таблице. Проверьте название листа (должно быть 'iPhone').")
+        logging.error(f"❌ Лист '{sheet_name}' не найден в таблице.")
+        return []
     except Exception as e:
-        logging.error(f"❌ Общая ошибка при работе с Google Sheets API: {e}")
-        
-    return []
+        logging.error(f"❌ Неизвестная ошибка Gspread: {e}")
+        return []
 
-# Пример использования (можно удалить после тестирования)
-if __name__ == '__main__':
-    iphone_data = get_data_from_sheet("iPhone")
-    if iphone_data:
-        print(f"Первая запись: {iphone_data[0]}")
+# ... (Остальной код)
