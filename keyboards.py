@@ -1,68 +1,61 @@
 # keyboards.py
-
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# ПРИМЕЧАНИЕ: Здесь не должно быть импорта CATALOG. 
-# CATALOG будет передаваться в функции как аргумент.
-
-def get_main_menu(catalog_data: dict) -> InlineKeyboardMarkup:
+def get_main_menu(catalog_data: dict, web_app_url: str = None) -> InlineKeyboardMarkup:
     """
-    Генерирует главное меню с категориями, используя переданный словарь.
-    
-    :param catalog_data: Словарь с данными категорий (iPhone, Mac и т.д.)
+    Генерирует главное меню категорий.
+    Теперь поддерживает кнопку Web App!
     """
     builder = InlineKeyboardBuilder()
-    
-    # Добавляем кнопки для каждой категории
+
+    # 1. Кнопка Web App (если ссылка передана)
+    if web_app_url:
+        builder.row(InlineKeyboardButton(
+            text="🚀 Открыть каталог (Beta)", 
+            web_app=WebAppInfo(url=web_app_url)
+        ))
+
+    # 2. Кнопки категорий из каталога (для старого режима)
     for key, value in catalog_data.items():
-        # callback_data: cat_iphones, cat_macbooks, cat_ipads, cat_watches
-        builder.button(text=value['label'], callback_data=f"cat_{key}")
-    
-    # Располагаем по 2 кнопки в ряд
-    builder.adjust(2) 
+        # value может быть словарем {"label": "..."} или строкой
+        label = value.get("label", key) if isinstance(value, dict) else value
+        builder.row(InlineKeyboardButton(text=label, callback_data=f"cat_{key}"))
+
     return builder.as_markup()
 
-def get_models_keyboard(catalog_data: dict, category_key: str) -> InlineKeyboardMarkup:
-    """
-    Генерирует клавиатуру с моделями для НЕ-iPhone категорий.
-    Эта функция больше не используется для iPhone.
-    """
-    builder = InlineKeyboardBuilder()
-    
-    # Получаем список моделей по ключу
-    try:
-        models = catalog_data[category_key]['models']
-    except KeyError:
-        # Если категория не найдена, возвращаем главное меню
-        return get_main_menu(catalog_data)
-
-    for model in models:
-        # callback_data: item_Модель
-        builder.button(text=model, callback_data=f"item_{model}")
-    
-    # Добавляем кнопку "Назад"
-    builder.button(text="🔙 Назад к категориям", callback_data="back_to_main")
-    
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_dynamic_keyboard(data: list[str], callback_prefix: str, back_callback: str) -> InlineKeyboardMarkup:
-    """
-    Генерирует клавиатуру из списка уникальных значений (для пошагового выбора iPhone).
-    
-    :param data: Список уникальных значений (напр., ['256 GB', '512 GB'])
-    :param callback_prefix: Префикс для callback_data (напр., 'val_')
-    :param back_callback: callback для кнопки "Назад"
-    """
+def get_dynamic_keyboard(data: list, callback_prefix: str, back_callback: str = "back_to_main") -> InlineKeyboardMarkup:
+    """Генерирует клавиатуру выбора (Модели, Памяти и т.д.) с ценами."""
     builder = InlineKeyboardBuilder()
     
     for item in data:
-        # ВАЖНО: Кодируем данные для использования в callback_data
-        encoded_item = item.replace(" ", "_").replace("/", "-") 
-        builder.button(text=item, callback_data=f"{callback_prefix}{encoded_item}")
-    
-    builder.button(text="🔙 Назад", callback_data=back_callback)
-    builder.adjust(1)
+        # Если item - это просто строка (например, цвет "Black")
+        if isinstance(item, str):
+            text = item
+            callback = f"{callback_prefix}{item}"
+        # Если item - это кортеж/список [Значение, Цена] (например, ["128 GB", "80000"])
+        elif isinstance(item, (list, tuple)) and len(item) == 2:
+            text = f"{item[0]} — {item[1]} ₽"
+            # В callback кладем только значение, чтобы не ломать логику
+            callback = f"{callback_prefix}{item[0]}"
+        else:
+            continue
+            
+        # Заменяем пробелы на _ для callback_data (защита от длинных строк)
+        safe_callback = callback.replace(" ", "_").replace("/", "-")
+        # Обрезаем, если слишком длинный (ограничение Telegram 64 байта)
+        safe_callback = safe_callback[:60]
+        
+        builder.row(InlineKeyboardButton(text=text, callback_data=safe_callback))
+
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback))
+    return builder.as_markup()
+
+def get_models_keyboard(catalog, category_key):
+    """Старая функция для MacBook/iPad (если нужна)"""
+    builder = InlineKeyboardBuilder()
+    models = catalog.get(category_key, {}).get("models", [])
+    for model in models:
+        builder.row(InlineKeyboardButton(text=model, callback_data=f"model_{model}"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main"))
     return builder.as_markup()
