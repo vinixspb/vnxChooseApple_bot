@@ -26,10 +26,10 @@ if not API_TOKEN:
 # Импорты наших модулей
 try:
     from keyboards import get_main_menu, get_dynamic_keyboard, get_models_keyboard
-    from gsheets_api import get_data_from_sheet 
+    # Исправляем путь: папка services -> файл sheets_manager
+    from services.sheets_manager import get_data_from_sheet 
 except ImportError as e:
-    # Эта ошибка теперь будет ловиться только при отсутствии файлов или необходимых библиотек (gspread)
-    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте наличие gsheets_api.py, keyboards.py и установку gspread.")
+    logging.error(f"❌ Критическая ошибка импорта: {e}. Проверьте структуру папок и файлы.")
     exit(1)
 
 
