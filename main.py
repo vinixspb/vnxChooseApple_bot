@@ -11,6 +11,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from dotenv import load_dotenv
+# Было: from gsheets_api import get_data_from_sheet
+from services.sheets_manager import get_data_from_sheet
 
 # --- КОНФИГУРАЦИЯ И ЗАГРУЗКА ---
 load_dotenv()
