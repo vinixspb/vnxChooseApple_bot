@@ -14,7 +14,7 @@ from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -23,6 +23,9 @@ load_dotenv()
 API_TOKEN = os.getenv('BOT_TOKEN') 
 MANAGER_ID = os.getenv('MANAGER_ID') 
 KIE_API_KEY = os.getenv('KIE_API_KEY') 
+
+# ТОЧНОЕ НАЗВАНИЕ МОДЕЛИ (измени здесь, если 422 повторится)
+AI_MODEL_NAME = "NanoBanana" 
 
 if not API_TOKEN:
     logging.error("❌ BOT_TOKEN не найден в .env. Завершение работы.")
@@ -109,15 +112,38 @@ async def update_message_content(callback: types.CallbackQuery, text: str, reply
             try: await callback.message.edit_text(text=text, reply_markup=reply_markup)
             except Exception: pass
 
-# --- ХЕНДЛЕРЫ: ОСНОВНЫЕ КОМАНДЫ ---
+# --- ХЕНДЛЕРЫ: КОМАНДЫ ---
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "👋 Добро пожаловать! Выберите категорию:",
+        "👋 Добро пожаловать в **vnxSHOP**!\nВыберите категорию техники Apple:",
         reply_markup=get_main_menu(web_app_url=None) 
     )
+
+@dp.message(Command("search"))
+async def cmd_search(message: types.Message, state: FSMContext):
+    await state.clear()
+    await load_catalog_if_empty()
+    await message.answer("📱 Выберите интересующую модель iPhone:", reply_markup=get_main_menu())
+
+@dp.message(Command("list"))
+async def cmd_list(message: types.Message):
+    await load_catalog_if_empty()
+    models = sorted(list(set(item.get("Модель") for item in GLOBAL_CATALOG if item.get("Модель"))))
+    await message.answer("📋 **Модели в наличии:**\n\n" + "\n".join([f"• {m}" for m in models]))
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer("❓ Помощь: выберите товар в меню, укажите параметры и дождитесь ответа менеджера. В конце доступна AI-магия!")
+
+@dp.message(Command("support"))
+async def cmd_support(message: types.Message):
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="👨‍💻 Менеджер", url="https://t.me/vinixspb"))
+    await message.answer("Нужна помощь? Напишите нам!", reply_markup=kb.as_markup())
+
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
@@ -205,7 +231,7 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
 
     text = f"✅ **{title}**\n\n💰 **Цена: {price} ₽**\n\n"
     text += "Заявка сформирована! Менеджер скоро напишет.\n\n"
-    text += f"✨ **Хотите небольшую магию?**\nОтправьте свое фото кнопкой ниже, и мы покажем этот {title} у вас в руках!"
+    text += f"✨ **Хотите небольшую магию?**\nНажмите кнопку ниже, отправьте свое фото, и мы покажем этот {title} у вас в руках!"
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📸 Примерить (AI магия)", callback_data="magic_tryon"))
@@ -224,7 +250,7 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
         try: await bot.send_message(chat_id=MANAGER_ID, text=f"🔥 ЗАЯВКА: {title} ({price} ₽)\n👤 {user.full_name} (@{user.username or 'Скрыт'})", reply_markup=manager_kb.as_markup())
         except: pass
 
-# --- ОБРАБОТЧИКИ AI-МАГИИ (ОТКАЗОУСТОЙЧИВЫЕ) ---
+# --- ОБРАБОТЧИКИ AI-МАГИИ (ОТКАЗОУСТОЙЧИВЫЕ ЧЕРЕЗ NANOBANANA) ---
 
 @dp.callback_query(F.data == "magic_tryon")
 async def trigger_magic(callback: types.CallbackQuery, state: FSMContext):
@@ -244,38 +270,41 @@ async def process_magic_photo(message: types.Message, state: FSMContext):
     status_msg = await message.answer("⌛️ Запускаю нейросети...")
     
     try:
-        # 1. Скачивание
         photo_id = message.photo[-1].file_id
         file_info = await bot.get_file(photo_id)
         downloaded_file = await bot.download_file(file_info.file_path)
         photo_bytes = downloaded_file.read()
         
-        await status_msg.edit_text(f"🎨 Создаю магию с {product_title}...\nЭто займет около 20 секунд.")
+        await status_msg.edit_text(f"🎨 Создаю магию с {product_title} через {AI_MODEL_NAME}...\nЭто займет около 20-30 секунд.")
         await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
         
-        # 2. Base64
         base64_image = base64.b64encode(photo_bytes).decode('utf-8')
         data_uri = f"data:image/jpeg;base64,{base64_image}"
         
-        # 3. Payload для FLUX (Best Model)
-        prompt_text = f"Photorealistic high-quality image. The person from the input image is now naturally holding a brand new {product_title} in their hands. Maintain the original person's face, identity, hair, clothing, and background environment exactly as they are. The {product_title} must be integrated realistically with correct lighting and shadows in their hands."
+        # УЛУЧШЕННЫЙ ПРОМПТ
+        prompt_text = (
+            f"A photorealistic high-quality image of the person from the input photo holding a brand new {product_title} in their hands. "
+            f"Keep the original person's identity, clothes, hair, and the background exactly the same. "
+            f"The {product_title} must be held naturally with realistic lighting and shadows."
+        )
         
+        # СТРОИМ PAYLOAD ПО СТАНДАРТУ ТВОЕГО KIE_CLIENT
         payload = {
-            "model": "flux", 
+            "model": AI_MODEL_NAME, 
             "input": {
                 "prompt": prompt_text,
                 "image_input": [data_uri],
-                "aspect_ratio": "9:16", # Оптимально для смартфонов
+                "aspect_ratio": "9:16",
                 "output_format": "png",
-                "image_size": "auto"
+                "google_search": False,
+                "resolution": "1K"
             }
         }
         
         headers = {"Authorization": f"Bearer {KIE_API_KEY}", "Content-Type": "application/json"}
         
-        # 4. Асинхронный запрос с таймаутом
-        async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=180)) as session:
-            # Создание
+        async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=200)) as session:
+            # Создание задачи
             async with session.post("https://api.kie.ai/api/v1/jobs/createTask", json=payload) as resp:
                 data = await resp.json()
                 task_id = data.get("data", {}).get("taskId") if data.get("code") == 200 else None
@@ -284,7 +313,7 @@ async def process_magic_photo(message: types.Message, state: FSMContext):
 
             # Ожидание (Polling)
             result_url = None
-            for _ in range(40): # 40 попыток по 4 сек = 160 сек
+            for _ in range(50): 
                 await asyncio.sleep(4)
                 async with session.get(f"https://api.kie.ai/api/v1/jobs/recordInfo?taskId={task_id}") as r_resp:
                     res_data = await r_resp.json()
@@ -294,17 +323,20 @@ async def process_magic_photo(message: types.Message, state: FSMContext):
                         res_json = json.loads(info.get("resultJson", "{}"))
                         result_url = res_json.get("resultUrls", [None])[0]
                         break
-                    elif info.get("state") == "fail": raise Exception("AI Generation Failed")
+                    elif info.get("state") == "fail": raise Exception(f"Generation Failed: {info.get('failMsg')}")
 
-        if not result_url: raise Exception("Timeout")
+        if not result_url: raise Exception("Timeout during generation")
         
-        # 5. Итог + Реклама vnxORACLE
         kb = InlineKeyboardBuilder()
-        kb.row(InlineKeyboardButton(text="🔮 Открыть vnxORACLE", url="https://t.me/vnxORACLE_bot"))
+        kb.row(InlineKeyboardButton(text="🔮 Больше магии в vnxORACLE", url="https://t.me/vnxORACLE_bot"))
         kb.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main"))
 
         await status_msg.delete()
-        await message.answer_photo(photo=result_url, caption=f"✨ Твой новый {product_title}! 📸\n\nХочешь еще больше AI-магии и умных ответов? Заходи в **vnxORACLE**! 🔮", reply_markup=kb.as_markup())
+        await message.answer_photo(
+            photo=result_url, 
+            caption=f"✨ Ваша персональная магия с **{product_title}** готова! 📸\n\nПонравилось? Еще больше крутых генераций и умных ответов — в нашем главном боте **vnxORACLE**! 🔮", 
+            reply_markup=kb.as_markup()
+        )
         
     except Exception as e:
         logging.error(f"Magic Error: {e}")
