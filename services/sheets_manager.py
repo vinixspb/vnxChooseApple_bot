@@ -22,7 +22,7 @@ def authorize_gspread():
         logging.error(f"❌ Ошибка авторизации: {e}")
         return None
 
-def get_data_from_sheet(sheet_name: str = "Worksheet") -> List[Dict[str, Any]]:
+def get_data_from_sheet(sheet_name: str = "vnxSHOP") -> List[Dict[str, Any]]:
     """
     Загружает данные и адаптирует их под нужды бота (стандарт Facebook Feed).
     """
@@ -46,17 +46,18 @@ def get_data_from_sheet(sheet_name: str = "Worksheet") -> List[Dict[str, Any]]:
 
             # Маппинг столбцов Facebook (на английском) в понятные боту ключи (на русском)
             item = {
-                "SKU": str(row.get("id", "")),
-                "Полное_название": str(row.get("title", "")),
-                "Наличие": str(row.get("availability", "out of stock")),
+                "SKU": str(row.get("id", "")).strip(),
+                "Полное_название": str(row.get("title", "")).strip(),
+                "Наличие": str(row.get("availability", "out of stock")).strip(),
                 "Цена": str(row.get("price", "0")).replace(" RUB", "").strip(),
-                "Ссылка на фото": str(row.get("image_link", "")),
-                "Бренд": str(row.get("brand", "Apple")),
-                "Цвет": str(row.get("color", "-")),
-                "Память": str(row.get("memory", "-")), # Данные из столбца memory
-                "SIM": str(row.get("sim", "-")),
-                "Модель": str(row.get("bot_model_group", row.get("title"))),
-                "Регион": str(row.get("region", "-")) # Наш новый столбец с флагами
+                "Ссылка на фото": str(row.get("image_link", "")).strip(),
+                "Бренд": str(row.get("brand", "Apple")).strip(),
+                "Цвет": str(row.get("color", "-")).strip(),
+                "Память": str(row.get("memory", "-")).strip(),
+                "SIM": str(row.get("sim", "-")).strip(),
+                # ВАЖНО: Используем item_group_id, так как наш AI парсер пишет модель именно туда
+                "Модель": str(row.get("item_group_id", row.get("title"))).strip(),
+                "Регион": str(row.get("region", "-")).strip()
             }
             cleaned_data.append(item)
 
