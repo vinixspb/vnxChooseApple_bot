@@ -176,6 +176,10 @@ class KieService:
                 logger.error(f"KIE createTask: ответ не JSON: {raw[:300]}")
                 return None
 
+            if data.get("code") == 402:
+                logger.error("KIE: недостаточно кредитов — пополни баланс на kie.ai")
+                raise RuntimeError("CREDITS_INSUFFICIENT")
+
             if data.get("code") != 200:
                 logger.error(f"KIE createTask Error: {data}")
                 return None
