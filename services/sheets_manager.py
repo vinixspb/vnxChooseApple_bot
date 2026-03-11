@@ -12,7 +12,6 @@ def authorize_gspread():
         return None
 
     try:
-        # Защита от лишних кавычек (если они случайно попали из .env)
         if credentials_json_str.startswith("'") and credentials_json_str.endswith("'"):
             credentials_json_str = credentials_json_str[1:-1]
             
@@ -23,9 +22,7 @@ def authorize_gspread():
         return None
 
 def get_data_from_sheet(sheet_name: str = "vnxSHOP") -> List[Dict[str, Any]]:
-    """
-    Загружает данные и адаптирует их под нужды бота (стандарт Facebook Feed).
-    """
+    """Загружает данные каталога (vnxSHOP)."""
     gc = authorize_gspread()
     if not gc: return []
 
@@ -34,17 +31,14 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP") -> List[Dict[str, Any]]:
         spreadsheet = gc.open_by_key(spreadsheet_id)
         worksheet = spreadsheet.worksheet(sheet_name)
         
-        # Получаем сырые данные
         raw_data = worksheet.get_all_records()
         logging.info(f"✅ Загружено {len(raw_data)} строк из '{sheet_name}'.")
 
         cleaned_data = []
         for row in raw_data:
-            # Если нет ID товара, пропускаем пустую строку
             if not row.get("id"): 
                 continue
 
-            # Маппинг столбцов Facebook (на английском) в понятные боту ключи (на русском)
             item = {
                 "SKU": str(row.get("id", "")).strip(),
                 "Полное_название": str(row.get("title", "")).strip(),
@@ -55,7 +49,6 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP") -> List[Dict[str, Any]]:
                 "Цвет": str(row.get("color", "-")).strip(),
                 "Память": str(row.get("memory", "-")).strip(),
                 "SIM": str(row.get("sim", "-")).strip(),
-                # ВАЖНО: Используем item_group_id, так как наш AI парсер пишет модель именно туда
                 "Модель": str(row.get("item_group_id", row.get("title"))).strip(),
                 "Регион": str(row.get("region", "-")).strip()
             }
@@ -64,5 +57,33 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP") -> List[Dict[str, Any]]:
         return cleaned_data
 
     except Exception as e:
-        logging.error(f"❌ Ошибка загрузки данных: {e}")
+        logging.error(f"❌ Ошибка загрузки данных каталога: {e}")
         return []
+
+def get_settings() -> Dict[str, str]:
+    """
+    Загружает лист Settings и возвращает словарь: {"iPhone": "http...", "iPad": "http..."}
+    """
+    gc = authorize_gspread()
+    if not gc: return {}
+
+    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    try:
+        spreadsheet = gc.open_by_key(spreadsheet_id)
+        worksheet = spreadsheet.worksheet("Settings")
+        
+        raw_data = worksheet.get_all_records()
+        logging.info(f"✅ Загружены настройки заглушек (Settings).")
+        
+        settings_dict = {}
+        for row in raw_data:
+            cat = str(row.get("Категория", "")).strip()
+            link = str(row.get("Ссылка", "")).strip()
+            if cat and link:
+                settings_dict[cat] = link
+                
+        return settings_dict
+
+    except Exception as e:
+        logging.warning(f"⚠️ Ошибка загрузки листа Settings (возможно он еще не создан): {e}")
+        return {}
