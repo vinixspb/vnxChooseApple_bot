@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import random
 import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -290,6 +291,43 @@ async def magic_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# Юморные сообщения пока идёт генерация — меняем каждые 5 секунд
+MAGIC_MESSAGES = [
+    "⌛️ Колдуем...",
+    "📐 Проектируем идеальный хват под вашу руку...",
+    "🎨 Выбираем цвет, который подчёркивает ваш характер...",
+    "🔬 Рассчитываем оптимальное расположение камер на задней стенке...",
+    "✨ Наносим финишный антибликовый слой...",
+    "🪄 Калибруем магнитный коннектор под вашу ауру...",
+    "💅 Полируем грани до зеркального блеска...",
+    "📡 Согласовываем частоты с ближайшей вышкой 5G...",
+    "🧬 Синхронизируем чип с вашей биометрией...",
+    "🌈 Применяем фирменный эффект Apple Glow™...",
+    "🎭 Добавляем индивидуальности в каждый пиксель...",
+    "🔭 Финальная проверка всех 48 мегапикселей...",
+    "🎁 Упаковываем результат в фирменную коробочку...",
+]
+
+
+async def _animate_magic_msg(msg, stop_event: asyncio.Event):
+    """Меняет текст сообщения каждые 5 секунд пока идёт генерация."""
+    shown = {MAGIC_MESSAGES[0]}
+    pool = MAGIC_MESSAGES[1:]
+    while not stop_event.is_set():
+        await asyncio.sleep(5)
+        if stop_event.is_set():
+            break
+        remaining = [m for m in pool if m not in shown]
+        if not remaining:
+            remaining = pool  # пошли по второму кругу
+        pick = random.choice(remaining)
+        shown.add(pick)
+        try:
+            await msg.edit_text(pick)
+        except Exception:
+            pass  # сообщение уже удалено или не изменилось — ок
+
+
 @dp.message(ProductSelection.waiting_for_magic_photo, F.photo)
 async def magic_process(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -297,7 +335,9 @@ async def magic_process(message: types.Message, state: FSMContext):
     product_image_url = data.get("product_image_url", "")
     title_safe = html.escape(title)
 
-    msg = await message.answer("⌛️ Колдуем...")
+    msg = await message.answer(MAGIC_MESSAGES[0])
+    stop_event = asyncio.Event()
+    animator = asyncio.create_task(_animate_magic_msg(msg, stop_event))
 
     try:
         # Фото пользователя
@@ -317,10 +357,13 @@ async def magic_process(message: types.Message, state: FSMContext):
         url = await kie_ai.generate_magic_image(
             user_photo_bytes,
             title,
-            product_image_bytes=product_image_bytes,   # референс девайса
+            product_image_bytes=product_image_bytes,
         )
         if not url:
             raise ValueError("API вернул пустой URL")
+
+        stop_event.set()
+        animator.cancel()
 
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="🔮 Больше в vnxORACLE", url="https://t.me/vnxORACLE_bot"))
@@ -333,11 +376,15 @@ async def magic_process(message: types.Message, state: FSMContext):
             reply_markup=kb.as_markup()
         )
     except RuntimeError as e:
+        stop_event.set()
+        animator.cancel()
         if str(e) == "CREDITS_INSUFFICIENT":
             await msg.edit_text("⚠️ Магия временно недоступна — скоро вернётся!")
         else:
             await msg.edit_text("❌ Ошибка магии. Попробуйте другое фото.")
     except Exception as e:
+        stop_event.set()
+        animator.cancel()
         logger.error(f"magic_process error: {e}")
         await msg.edit_text("❌ Ошибка магии. Попробуйте другое фото.")
     finally:
