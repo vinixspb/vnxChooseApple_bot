@@ -75,19 +75,80 @@ class KieService:
             logger.info(f"KIE upload success → {url}")
             return url
 
+    @staticmethod
+    def _build_prompt(product_title: str) -> str:
+        """
+        Строим промпт с явным визуальным описанием девайса.
+        Для новых моделей (iPhone 17 Pro и новее) модель может не знать дизайн —
+        поэтому описываем его словами, а не надеемся на знания AI.
+        """
+        title = product_title.strip()
+
+        # ── iPhone 17 Pro / Pro Max ─────────────────────────────────────────
+        if "17 Pro" in title:
+            device_description = (
+                "a brand new Apple iPhone 17 Pro smartphone. "
+                "The phone has a rectangular aluminum unibody design. "
+                "On the back there is a wide horizontal 'camera plateau' bar "
+                "that spans almost the full width of the upper portion of the phone — "
+                "NOT a square bump in the corner. "
+                "Inside this horizontal bar, three camera lenses are arranged "
+                "in a triangular layout, with the True Tone flash and LiDAR sensor "
+                "positioned to the right of the lenses. "
+                "The back surface below the camera plateau is smooth aluminum. "
+                "The phone has squared-off flat edges."
+            )
+
+        # ── iPhone 17 (базовый) ─────────────────────────────────────────────
+        elif "iPhone 17" in title and "Air" not in title:
+            device_description = (
+                "a brand new Apple iPhone 17 smartphone. "
+                "The phone has a flat aluminum frame with a glass back. "
+                "On the back there is a vertical dual-camera module on the left side. "
+                "Clean minimalist design with squared-off flat edges."
+            )
+
+        # ── iPhone 17 Air ───────────────────────────────────────────────────
+        elif "17 Air" in title:
+            device_description = (
+                "a brand new Apple iPhone 17 Air smartphone. "
+                "Extremely thin profile, the thinnest iPhone ever made. "
+                "Single rear camera lens. Ultra-slim flat aluminum edges."
+            )
+
+        # ── iPhone 16 Pro / Pro Max ─────────────────────────────────────────
+        elif "16 Pro" in title:
+            device_description = (
+                "a brand new Apple iPhone 16 Pro smartphone. "
+                "Titanium frame with a glass back. "
+                "Square camera bump in the upper-left corner of the back "
+                "containing three camera lenses arranged in a triangle, "
+                "with the flash below them. Flat squared-off edges."
+            )
+
+        # ── Фолбэк для всех остальных моделей ──────────────────────────────
+        else:
+            device_description = f"a brand new {title} smartphone by Apple"
+
+        return (
+            f"A photorealistic high-quality image. "
+            f"The person from the input image is now naturally holding "
+            f"{device_description} "
+            f"in their hands, screen facing the viewer. "
+            f"Keep the original person's identity, face, clothes, and background "
+            f"exactly the same as in the original photo. "
+            f"Integrate the phone realistically with correct lighting, "
+            f"reflections and shadows matching the scene. "
+            f"The device must look exactly as described above — "
+            f"do NOT substitute with any other phone model or design."
+        )
+
     async def _create_task(self, session: aiohttp.ClientSession, image_url: str, product_title: str) -> str | None:
         """
         Шаг 2: создаём задачу генерации, передаём URL из шага 1.
         Возвращает taskId или None.
         """
-        prompt = (
-            f"A photorealistic high-quality image. "
-            f"The person from the input image is now naturally holding "
-            f"a brand new {product_title} in their hands. "
-            f"Keep the original person's identity, face, clothes, and background "
-            f"exactly the same as in the original photo. "
-            f"Integrate the {product_title} realistically with correct lighting and shadows."
-        )
+        prompt = self._build_prompt(product_title)
 
         payload = {
             "model": "nano-banana-2",
