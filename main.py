@@ -2,12 +2,13 @@ import asyncio
 import html
 import logging
 import os
+import aiohttp
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import InlineKeyboardButton, InputMediaPhoto, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -19,7 +20,6 @@ from keyboards import get_main_menu, get_dynamic_keyboard
 load_dotenv()
 MANAGER_ID = os.getenv('MANAGER_ID')
 
-# ФИX #1: Переходим с MARKDOWN на HTML — он не падает на _ в динамических данных
 bot = Bot(
     token=os.getenv('BOT_TOKEN'),
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -31,6 +31,17 @@ CATALOG = []
 SETTINGS = {}
 STAGES = ["model_group", "memory", "sim", "color"]
 
+# Браузерный UA — без него Apple CDN и другие хосты отдают 403
+FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Referer": "https://www.apple.com/",
+}
+
 
 async def load_all():
     global CATALOG, SETTINGS
@@ -40,13 +51,77 @@ async def load_all():
 
 def get_stub(cat, model=""):
     keys = {
-        "iPhone": "iPhone_STUB",
-        "iPad": "iPad_STUB",
-        "Watch": "AppleWatch_STUB",
-        "AirPods": "AirPods_STUB"
+        "iPhone":  "iPhone_STUB",
+        "iPad":    "iPad_STUB",
+        "Watch":   "AppleWatch_STUB",
+        "AirPods": "AirPods_STUB",
     }
     key = keys.get(cat, "MacBook_STUB" if "iMac" not in model else "iMac_STUB")
     return SETTINGS.get(key)
+
+
+async def fetch_image_bytes(url: str) -> bytes | None:
+    """
+    Скачиваем картинку на сервере с браузерным User-Agent.
+    Нужно потому что Telegram не может напрямую получить картинки
+    с Apple CDN и других хостов, которые блокируют ботов.
+    """
+    if not url or not url.startswith("http"):
+        return None
+    try:
+        async with aiohttp.ClientSession(headers=FETCH_HEADERS) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    logger.info(f"fetch_image_bytes: {url[:60]} → {len(data)} bytes")
+                    return data
+                logger.warning(f"fetch_image_bytes: HTTP {resp.status} for {url[:60]}")
+                return None
+    except Exception as e:
+        logger.warning(f"fetch_image_bytes error: {e}")
+        return None
+
+
+async def send_photo_safe(
+    target,          # message или callback.message
+    url: str,
+    caption: str,
+    reply_markup,
+    is_edit: bool = False,
+):
+    """
+    Отправляем или редактируем фото-сообщение.
+    Сначала пробуем прямым URL — быстро и без трафика.
+    Если Telegram отклонит (403/400) — скачиваем байты на сервере и шлём как файл.
+    """
+    async def _as_buffered(photo_bytes: bytes):
+        buf = BufferedInputFile(photo_bytes, filename="photo.jpg")
+        if is_edit:
+            await target.edit_media(InputMediaPhoto(media=buf, caption=caption), reply_markup=reply_markup)
+        else:
+            await target.answer_photo(buf, caption=caption, reply_markup=reply_markup)
+
+    try:
+        if is_edit:
+            await target.edit_media(
+                InputMediaPhoto(media=url, caption=caption), reply_markup=reply_markup
+            )
+        else:
+            await target.answer_photo(url, caption=caption, reply_markup=reply_markup)
+    except Exception as e:
+        logger.warning(f"send_photo_safe: прямой URL не сработал ({e}), качаю байты...")
+        photo_bytes = await fetch_image_bytes(url)
+        if photo_bytes:
+            await _as_buffered(photo_bytes)
+        else:
+            # Совсем без фото — шлём просто текст
+            if is_edit:
+                await target.edit_caption(caption=caption, reply_markup=reply_markup)
+            else:
+                await target.answer(caption, reply_markup=reply_markup)
+
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────── ХЕНДЛЕРЫ ───────────────────────
@@ -54,7 +129,6 @@ def get_stub(cat, model=""):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    # ФИX #1: Теги HTML вместо ** для жирного
     await message.answer("👋 Добро пожаловать в <b>vnxSHOP</b>!", reply_markup=get_main_menu())
 
 
@@ -71,17 +145,13 @@ async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
 async def start_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer("Загрузка...")
     await load_all()
-
     cat = callback.data.split("_")[1]
     await state.set_state(ProductSelection.selecting)
     await run_step(callback, state, {"cat": cat}, 0)
 
 
 async def run_step(callback, state, filters, idx):
-    # Фильтруем по категории
     data = [i for i in CATALOG if filters["cat"].lower() in str(i["model_group"]).lower()]
-
-    # Фильтруем по уже выбранным шагам
     for i in range(idx):
         stage = STAGES[i]
         if stage in filters:
@@ -96,30 +166,25 @@ async def run_step(callback, state, filters, idx):
     step_name = STAGES[idx]
     vals = sorted(list(set(d[step_name] for d in data if d.get(step_name))))
 
-    # Пропускаем шаг, если единственное значение — прочерк
     if len(vals) == 1 and vals[0] == "-":
         filters[step_name] = "-"
         return await run_step(callback, state, filters, idx + 1)
 
-    # ФИX #2: val_map строим по числовому индексу — полностью исключает
-    # коллизии и спецсимволы в callback_data (_, /, скобки и т.д.)
     val_map = {}
     kb_list = []
     for i, v in enumerate(vals):
         if v == "-":
             continue
-        key = str(i)           # "0", "1", "2" — всегда безопасно
+        key = str(i)
         val_map[key] = v
-        kb_list.append((key, v))  # передаём (ключ, метка) в клавиатуру
+        kb_list.append((key, v))
 
     await state.update_data(filters=filters, idx=idx, val_map=val_map)
 
-    # ФИX #1 + ФИX #3: html.escape на КАЖДОМ динамическом значении,
-    # проверяем STAGES[i], а не STAGES[idx] — это и был баг с idx vs i
     already_selected = "\n".join(
         f"▪️ {STAGES[i]}: <b>{html.escape(str(filters[STAGES[i]]))}</b>"
         for i in range(idx)
-        if filters.get(STAGES[i], "-") != "-"   # ФИX #3: был filters[STAGES[idx]]
+        if filters.get(STAGES[i], "-") != "-"
     )
     text = (
         f"📦 <b>{html.escape(filters['cat'])}</b>\n"
@@ -127,20 +192,17 @@ async def run_step(callback, state, filters, idx):
         f"👇 Выберите <b>{html.escape(step_name)}</b>:"
     )
 
-    photo = get_stub(filters["cat"], filters.get("model_group", ""))
+    stub_url = get_stub(filters["cat"], filters.get("model_group", ""))
     kb = get_dynamic_keyboard(kb_list, "stg_")
 
-    # ФИX #4: edit_text нельзя вызывать на photo-сообщении → используем edit_caption
-    if photo and not callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer_photo(photo, caption=text, reply_markup=kb)
-    elif photo:
-        await callback.message.edit_media(
-            InputMediaPhoto(media=photo, caption=text), reply_markup=kb
-        )
+    if stub_url:
+        if callback.message.photo:
+            await send_photo_safe(callback.message, stub_url, text, kb, is_edit=True)
+        else:
+            await callback.message.delete()
+            await send_photo_safe(callback.message, stub_url, text, kb, is_edit=False)
     else:
         if callback.message.photo:
-            # ФИX #4: photo-сообщение — только edit_caption, не edit_text
             await callback.message.edit_caption(caption=text, reply_markup=kb)
         else:
             await callback.message.edit_text(text, reply_markup=kb)
@@ -150,15 +212,12 @@ async def run_step(callback, state, filters, idx):
 async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     s = await state.get_data()
-
-    # ФИX #2: достаём значение из val_map по числовому ключу
     raw_key = callback.data.replace("stg_", "")
     val = s["val_map"].get(raw_key)
 
     if val is None:
-        # Защита: если ключ не найден — возвращаем в меню
         await callback.message.answer("⚠️ Сессия устарела. Начните заново.", reply_markup=get_main_menu())
-        await s_state.clear() if (s_state := callback) else None
+        await state.clear()
         return
 
     filters = s["filters"]
@@ -167,13 +226,12 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
 
 
 async def finalize(callback, item, state):
-    # ФИX #1: HTML-теги, html.escape на всех полях из таблицы
-    title_safe   = html.escape(str(item.get('title', '')))
-    price_safe   = html.escape(str(item.get('price', '')))
-    memory_safe  = html.escape(str(item.get('memory', '-')))
-    color_safe   = html.escape(str(item.get('color', '-')))
-    sim_safe     = html.escape(str(item.get('sim', '-')))
-    region_safe  = html.escape(str(item.get('region', '-')))
+    title_safe  = html.escape(str(item.get('title', '')))
+    price_safe  = html.escape(str(item.get('price', '')))
+    memory_safe = html.escape(str(item.get('memory', '-')))
+    color_safe  = html.escape(str(item.get('color', '-')))
+    sim_safe    = html.escape(str(item.get('sim', '-')))
+    region_safe = html.escape(str(item.get('region', '-')))
 
     text = (
         f"✅ <b>{title_safe}</b>\n\n"
@@ -183,7 +241,7 @@ async def finalize(callback, item, state):
         f"🌍 Регион: {region_safe}\n\n"
         f"💰 <b>Цена: {price_safe} ₽</b>\n\n"
         "Заявка создана! Менеджер свяжется с вами.\n\n"
-        "✨ <b>Хотите магию?</b> Отправьте фото!"
+        "✨ <b>Хотите магию?</b> Нажми кнопку и отправь своё фото!"
     )
 
     kb = InlineKeyboardBuilder()
@@ -191,23 +249,24 @@ async def finalize(callback, item, state):
     kb.row(InlineKeyboardButton(text="⬅️ Меню", callback_data="back_to_main"))
 
     image_url = item.get('image', '')
-    photo = image_url if image_url.startswith("http") else get_stub(item.get('model_group', ''))
+    photo_url = image_url if image_url.startswith("http") else get_stub(item.get('model_group', ''))
 
-    # ФИX #4: правильный метод в зависимости от типа сообщения
     if callback.message.photo:
-        if photo:
-            await callback.message.edit_media(
-                InputMediaPhoto(media=photo, caption=text), reply_markup=kb.as_markup()
-            )
+        if photo_url:
+            await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=True)
         else:
             await callback.message.edit_caption(caption=text, reply_markup=kb.as_markup())
     else:
-        if photo:
-            await callback.message.answer_photo(photo, caption=text, reply_markup=kb.as_markup())
+        if photo_url:
+            await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=False)
         else:
             await callback.message.answer(text, reply_markup=kb.as_markup())
 
-    await state.update_data(title=item.get('title', ''))
+    # Сохраняем title И image_url товара для AI магии
+    await state.update_data(
+        title=item.get('title', ''),
+        product_image_url=photo_url or "",
+    )
 
     if MANAGER_ID:
         user = callback.from_user
@@ -235,15 +294,31 @@ async def magic_start(callback: types.CallbackQuery, state: FSMContext):
 async def magic_process(message: types.Message, state: FSMContext):
     data = await state.get_data()
     title = data.get("title", "Apple девайс")
+    product_image_url = data.get("product_image_url", "")
     title_safe = html.escape(title)
-    msg = await message.answer("⌛️ Колдуем через nano-banana-2...")
+
+    msg = await message.answer("⌛️ Колдуем...")
 
     try:
+        # Фото пользователя
         file = await bot.get_file(message.photo[-1].file_id)
-        photo_bytes = (await bot.download_file(file.file_path)).read()
+        user_photo_bytes = (await bot.download_file(file.file_path)).read()
         await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_PHOTO)
 
-        url = await kie_ai.generate_magic_image(photo_bytes, title)
+        # Фото товара из карточки — качаем на сервере
+        product_image_bytes = None
+        if product_image_url:
+            product_image_bytes = await fetch_image_bytes(product_image_url)
+            if product_image_bytes:
+                logger.info(f"magic_process: product image loaded ({len(product_image_bytes)} bytes)")
+            else:
+                logger.warning("magic_process: не удалось загрузить фото товара, работаем без референса")
+
+        url = await kie_ai.generate_magic_image(
+            user_photo_bytes,
+            title,
+            product_image_bytes=product_image_bytes,   # референс девайса
+        )
         if not url:
             raise ValueError("API вернул пустой URL")
 
@@ -257,8 +332,13 @@ async def magic_process(message: types.Message, state: FSMContext):
             caption=f"✨ Ваша магия с <b>{title_safe}</b>!\n\nЗаходите в <b>vnxORACLE</b> за добавкой!",
             reply_markup=kb.as_markup()
         )
+    except RuntimeError as e:
+        if str(e) == "CREDITS_INSUFFICIENT":
+            await msg.edit_text("⚠️ Магия временно недоступна — скоро вернётся!")
+        else:
+            await msg.edit_text("❌ Ошибка магии. Попробуйте другое фото.")
     except Exception as e:
-        logging.error(f"magic_process error: {e}")
+        logger.error(f"magic_process error: {e}")
         await msg.edit_text("❌ Ошибка магии. Попробуйте другое фото.")
     finally:
         await state.clear()
