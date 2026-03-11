@@ -3,14 +3,15 @@
 import asyncio
 import logging
 import os
+import io
 from typing import Dict, List, Any
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -33,18 +34,17 @@ except ImportError as e:
 # --- FSM СОСТОЯНИЯ ---
 class ProductSelection(StatesGroup):
     selecting = State() 
-    waiting_for_magic_photo = State() # Состояние для приема фото от клиента
+    waiting_for_magic_photo = State() 
 
 # --- КОНСТАНТЫ И ГЛОБАЛЬНАЯ БАЗА ---
 STAGES = ["Модель", "Память", "SIM", "Цвет"] 
 GLOBAL_CATALOG: List[Dict[str, Any]] = []
 GLOBAL_SETTINGS: Dict[str, str] = {} 
 
-# Ключи для страницы Settings (ЗАГЛУШКИ ДЛЯ КАТЕГОРИЙ)
 STUB_KEYS = {
     "iPhone": "iPhone_STUB",
     "iPad": "iPad_STUB",
-    "Mac": "MacBook_STUB",  # По умолчанию для Mac (разделяем ниже умной функцией)
+    "Mac": "MacBook_STUB",  
     "Watch": "AppleWatch_STUB",
     "AirPods": "AirPods_STUB"
 }
@@ -73,7 +73,6 @@ def get_filtered_catalog(current_filter: Dict[str, str]) -> List[Dict[str, Any]]
     return filtered
 
 def get_stub_key(category: str, model: str = "") -> str:
-    """Умный определитель ключа заглушки для листа Settings"""
     cat_lower = category.lower()
     mod_lower = model.lower()
     
@@ -82,7 +81,6 @@ def get_stub_key(category: str, model: str = "") -> str:
     if "watch" in cat_lower: return "AppleWatch_STUB"
     if "airpods" in cat_lower: return "AirPods_STUB"
     
-    # Разделяем Mac на MacBook и iMac
     if "mac" in cat_lower:
         if "imac" in mod_lower:
             return "iMac_STUB"
@@ -166,7 +164,6 @@ async def ask_next_stage(callback: types.CallbackQuery, state: FSMContext, curre
         await state.clear()
         return
 
-    # Если дошли до конца — показываем финальную карточку
     if stage_index >= len(STAGES):
         await show_final_product(callback, filtered[0], state)
         return
@@ -174,7 +171,6 @@ async def ask_next_stage(callback: types.CallbackQuery, state: FSMContext, curre
     stage_name = STAGES[stage_index]
     unique_values = sorted(list(set(item.get(stage_name, "-") for item in filtered)))
 
-    # Авто-пропуск пустых шагов
     if len(unique_values) == 1 and unique_values[0] == "-":
         current_filter[stage_name] = "-"
         return await ask_next_stage(callback, state, current_filter, stage_index + 1)
@@ -219,7 +215,6 @@ async def ask_next_stage(callback: types.CallbackQuery, state: FSMContext, curre
 
     text += f"\n👇 Выберите параметр **{stage_name}**:"
 
-    # ВЫБИРАЕМ КАРТИНКУ: Умный поиск заглушки
     stub_key = get_stub_key(cat_name, model_name)
     photo_url = GLOBAL_SETTINGS.get(stub_key, "")
 
@@ -264,7 +259,6 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
         stub_key = get_stub_key(category_name, title)
         photo_url = GLOBAL_SETTINGS.get(stub_key, "")
 
-    # Текст финальной карточки
     text = f"✅ **{title}**\n\n"
     if memory != "-": text += f"💾 Память: {memory}\n"
     if sim != "-": text += f"📡 Связь: {sim}\n"
@@ -275,21 +269,17 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
     text += f"💰 **Цена: {price} ₽**\n\n"
     text += "Заявка сформирована. Менеджер скоро свяжется с вами для оформления!\n\n"
     
-    # Добавляем интригу с магией
     text += f"✨ **Кстати, хотите небольшую магию?**\n"
     text += f"Нажмите кнопку ниже, чтобы увидеть, как этот {title} будет смотреться с вами!"
 
     builder = InlineKeyboardBuilder()
-    # Кнопка магии
     builder.row(InlineKeyboardButton(text="📸 Примерить (AI магия)", callback_data="magic_tryon"))
     builder.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main"))
 
     await update_message_content(callback, text, builder.as_markup(), photo_url)
 
-    # Сохраняем название товара в стейт, чтобы ИИ знал, что мы примеряем
     await state.update_data(magic_product_title=title)
 
-    # --- ОТПРАВКА УВЕДОМЛЕНИЯ МЕНЕДЖЕРУ ---
     user = callback.from_user
     manager_message = (
         "🔥 **НОВАЯ ЗАЯВКА ИЗ БОТА!**\n"
@@ -315,47 +305,64 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
 
 @dp.callback_query(F.data == "magic_tryon")
 async def trigger_magic(callback: types.CallbackQuery, state: FSMContext):
-    """Клиент нажал кнопку Магии"""
-    # Согласованный текст
     await callback.message.answer(
         "Отлично! 📸 Отправьте мне любое свое фото, и наша нейросеть покажет магию с выбранным устройством!"
     )
-    # Переводим бота в режим ожидания фотографии
     await state.set_state(ProductSelection.waiting_for_magic_photo)
     await callback.answer()
 
 @dp.message(ProductSelection.waiting_for_magic_photo, F.photo)
 async def process_magic_photo(message: types.Message, state: FSMContext):
-    """Принимаем фото от клиента и выдаем рекламу vnxORACLE"""
+    """Принимаем фото от клиента, скачиваем его и отправляем в нейросеть"""
     user_data = await state.get_data()
     product_title = user_data.get("magic_product_title", "Apple девайс")
     
-    # Отправляем статус генерации
-    status_msg = await message.answer(f"⌛️ Передаю фото нейросети... Генерирую магию с {product_title}. Пожалуйста, подождите!")
+    # Отправляем первичный статус
+    status_msg = await message.answer("⌛️ Скачиваю фотографию...")
     
-    # ЗДЕСЬ БУДЕТ ВЫЗОВ ФУНКЦИИ ИЗ API vnxORACLE
-    # Пока имитируем работу нейросети (3 секунды)
-    await asyncio.sleep(3) 
-    
+    try:
+        # 1. Получаем ID самого большого фото (лучшего качества)
+        photo_id = message.photo[-1].file_id
+        
+        # 2. Скачиваем фото в оперативную память сервера
+        file_info = await bot.get_file(photo_id)
+        downloaded_file = await bot.download_file(file_info.file_path)
+        photo_bytes = downloaded_file.read()
+        
+        # 3. Обновляем статус и включаем анимацию "отправки фото" в шапке чата
+        await status_msg.edit_text(f"✨ Нейросеть начала работу! Интегрируем {product_title}...\nПожалуйста, подождите 10-15 секунд.")
+        await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
+        
+        # --- МЕСТО ДЛЯ ВЫЗОВА API vnxORACLE ---
+        # Здесь мы отправим photo_bytes в OpenAI / Replicate
+        await asyncio.sleep(4) # Временная имитация работы
+        
+        # Временная логика (пока не подключим API, отправляем оригинальное фото клиента обратно)
+        result_photo = BufferedInputFile(photo_bytes, filename="magic_result.jpg")
+        
+        # Подготавливаем рекламную клавиатуру
+        promo_kb = InlineKeyboardBuilder()
+        promo_kb.row(InlineKeyboardButton(text="🔮 Открыть vnxORACLE", url="https://t.me/vnxORACLE_bot"))
+        promo_kb.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main"))
+
+        final_text = (
+            f"✨ Ваша персональная магия с **{product_title}** готова! 📸\n\n"
+            f"Понравилось? Хочешь больше нейросетевой магии, крутых генераций и умных ответов на любые вопросы? "
+            f"Переходи к нашему главному AI-помощнику — **vnxORACLE**! 🔮"
+        )
+
+        # Удаляем сообщение со статусом "Генерирую..."
+        await status_msg.delete()
+        
+        # Отправляем готовое фото
+        await message.answer_photo(photo=result_photo, caption=final_text, reply_markup=promo_kb.as_markup())
+        
+    except Exception as e:
+        logging.error(f"Ошибка при обработке фото: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка при обработке фотографии. Попробуйте отправить другое фото.")
+
     # Возвращаем пользователя в обычное состояние
     await state.clear()
-    
-    # Подготавливаем рекламную клавиатуру
-    promo_kb = InlineKeyboardBuilder()
-    # ВНИМАНИЕ: Замени 'vnxORACLE_bot' на реальный юзернейм твоего оракула
-    promo_kb.row(InlineKeyboardButton(text="🔮 Открыть vnxORACLE", url="https://t.me/vnxORACLE_bot"))
-    promo_kb.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main"))
-
-    # Финальный текст с рекламой
-    final_text = (
-        f"✨ Ваша персональная магия с **{product_title}** готова! 📸\n\n"
-        f"*(Здесь скоро будет сгенерированная картинка)*\n\n"
-        f"Понравилось? Хочешь больше нейросетевой магии, крутых генераций и умных ответов на любые вопросы? "
-        f"Переходи к нашему главному AI-помощнику — **vnxORACLE**! 🔮"
-    )
-
-    # Обновляем статус на финальное сообщение
-    await status_msg.edit_text(text=final_text, reply_markup=promo_kb.as_markup())
 
 # --- ЗАПУСК БОТА ---
 async def main():
