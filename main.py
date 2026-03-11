@@ -4,6 +4,9 @@ import asyncio
 import logging
 import os
 import io
+import base64
+import json
+import aiohttp
 from typing import Dict, List, Any
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -11,7 +14,7 @@ from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, BufferedInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -19,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 API_TOKEN = os.getenv('BOT_TOKEN') 
 MANAGER_ID = os.getenv('MANAGER_ID') 
+KIE_API_KEY = os.getenv('KIE_API_KEY') # Ключ для kie.ai
 
 if not API_TOKEN:
     logging.error("❌ BOT_TOKEN не найден в .env. Завершение работы.")
@@ -301,7 +305,7 @@ async def show_final_product(callback: types.CallbackQuery, item: dict, state: F
         except Exception as e:
             logging.error(f"Не удалось отправить сообщение менеджеру: {e}")
 
-# --- ОБРАБОТЧИКИ ДЛЯ AI-МАГИИ ---
+# --- ОБРАБОТЧИКИ ДЛЯ AI-МАГИИ (ИНТЕГРАЦИЯ С KIE.AI) ---
 
 @dp.callback_query(F.data == "magic_tryon")
 async def trigger_magic(callback: types.CallbackQuery, state: FSMContext):
@@ -313,34 +317,97 @@ async def trigger_magic(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(ProductSelection.waiting_for_magic_photo, F.photo)
 async def process_magic_photo(message: types.Message, state: FSMContext):
-    """Принимаем фото от клиента, скачиваем его и отправляем в нейросеть"""
+    """Принимаем фото от клиента, скачиваем его и отправляем в kie.ai через Task API"""
     user_data = await state.get_data()
     product_title = user_data.get("magic_product_title", "Apple девайс")
     
+    if not KIE_API_KEY:
+        await message.answer("❌ Нейросеть временно недоступна (отсутствует ключ API).")
+        await state.clear()
+        return
+
     # Отправляем первичный статус
     status_msg = await message.answer("⌛️ Скачиваю фотографию...")
     
     try:
-        # 1. Получаем ID самого большого фото (лучшего качества)
+        # 1. Скачиваем фото клиента
         photo_id = message.photo[-1].file_id
-        
-        # 2. Скачиваем фото в оперативную память сервера
         file_info = await bot.get_file(photo_id)
         downloaded_file = await bot.download_file(file_info.file_path)
         photo_bytes = downloaded_file.read()
         
-        # 3. Обновляем статус и включаем анимацию "отправки фото" в шапке чата
-        await status_msg.edit_text(f"✨ Нейросеть начала работу! Интегрируем {product_title}...\nПожалуйста, подождите 10-15 секунд.")
+        await status_msg.edit_text(f"✨ Нейросеть начала работу! Интегрируем {product_title}...\nЭто может занять от 10 до 30 секунд. Пожалуйста, подождите!")
         await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_PHOTO)
         
-        # --- МЕСТО ДЛЯ ВЫЗОВА API vnxORACLE ---
-        # Здесь мы отправим photo_bytes в OpenAI / Replicate
-        await asyncio.sleep(4) # Временная имитация работы
+        # 2. Конвертируем фото в base64 (Data URI)
+        base64_image = base64.b64encode(photo_bytes).decode('utf-8')
+        data_uri = f"data:image/jpeg;base64,{base64_image}"
         
-        # Временная логика (пока не подключим API, отправляем оригинальное фото клиента обратно)
-        result_photo = BufferedInputFile(photo_bytes, filename="magic_result.jpg")
+        # 3. Формируем запрос для создания задачи в kie.ai (NanoBanana)
+        prompt_text = f"A photorealistic image. The person in the original image must be holding a brand new {product_title} in their hands. Keep the person's face, body, clothes, and the background exactly the same as the original photo. Only add the {product_title} naturally into their hands."
         
-        # Подготавливаем рекламную клавиатуру
+        create_url = "https://api.kie.ai/api/v1/jobs/createTask"
+        payload = {
+            "model": "NanoBanana",
+            "input": {
+                "prompt": prompt_text,
+                "image_input": [data_uri],
+                "aspect_ratio": "auto",
+                "google_search": False,
+                "resolution": "1K",
+                "output_format": "jpg"
+            }
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {KIE_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        task_id = None
+        result_photo_url = None
+        
+        # 4. Выполняем запросы через aiohttp
+        async with aiohttp.ClientSession(headers=headers) as session:
+            # --- Шаг А: Создание задачи ---
+            async with session.post(create_url, json=payload) as resp:
+                data = await resp.json()
+                if data.get("code") == 200:
+                    task_id = data.get("data", {}).get("taskId")
+                else:
+                    raise Exception(f"KIE Create Task Error: {data}")
+            
+            if not task_id:
+                raise Exception("Не удалось получить taskId от сервера.")
+
+            # --- Шаг Б: Ожидание результата (Polling) ---
+            query_url = f"https://api.kie.ai/api/v1/jobs/recordInfo?taskId={task_id}"
+            
+            for attempt in range(60): # Ждем до 3 минут (60 попыток по 3 сек)
+                await asyncio.sleep(3) 
+                async with session.get(query_url) as resp:
+                    result_data = await resp.json()
+                    if result_data.get("code") != 200: 
+                        continue
+                        
+                    task_info = result_data.get("data", {})
+                    task_state = task_info.get("state")
+                    
+                    if task_state == "success":
+                        result_json_str = task_info.get("resultJson", "{}")
+                        try:
+                            parsed = json.loads(result_json_str)
+                            result_photo_url = parsed.get("resultUrls", [None])[0]
+                            break
+                        except json.JSONDecodeError:
+                            break
+                    elif task_state == "fail":
+                        raise Exception(f"KIE Task Failed: {task_info.get('failMsg', 'Unknown')}")
+        
+        if not result_photo_url:
+            raise Exception("Истекло время ожидания генерации.")
+        
+        # 5. Выводим результат и рекламную кнопку vnxORACLE
         promo_kb = InlineKeyboardBuilder()
         promo_kb.row(InlineKeyboardButton(text="🔮 Открыть vnxORACLE", url="https://t.me/vnxORACLE_bot"))
         promo_kb.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main"))
@@ -351,15 +418,12 @@ async def process_magic_photo(message: types.Message, state: FSMContext):
             f"Переходи к нашему главному AI-помощнику — **vnxORACLE**! 🔮"
         )
 
-        # Удаляем сообщение со статусом "Генерирую..."
         await status_msg.delete()
-        
-        # Отправляем готовое фото
-        await message.answer_photo(photo=result_photo, caption=final_text, reply_markup=promo_kb.as_markup())
+        await message.answer_photo(photo=result_photo_url, caption=final_text, reply_markup=promo_kb.as_markup())
         
     except Exception as e:
         logging.error(f"Ошибка при обработке фото: {e}")
-        await status_msg.edit_text("❌ Произошла ошибка при обработке фотографии. Попробуйте отправить другое фото.")
+        await status_msg.edit_text("❌ Нейросеть слишком загружена или произошла ошибка. Попробуйте отправить другое фото.")
 
     # Возвращаем пользователя в обычное состояние
     await state.clear()
