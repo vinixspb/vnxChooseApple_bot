@@ -116,10 +116,14 @@ class KieService:
             f"face, clothes, pose, and background exactly the same. "
             f"{device_instruction} "
             f"The person is naturally holding the device with the BACK facing the viewer "
-        f"— the camera system must be clearly visible, screen facing away. "
+            f"— the camera system must be clearly visible, screen facing away. "
             f"Integrate the device realistically: correct perspective, lighting, "
             f"reflections and shadows matching the scene. "
-            f"Final result must look like a real unedited photograph."
+            f"Apply very subtle, natural beauty retouching to the person face only: "
+            f"smooth minor skin imperfections, remove any visible blemishes, cold sores "
+            f"or temporary skin issues, gently even out skin tone — keep it realistic "
+            f"and natural, not plastic or over-processed. "
+            f"Final result must look like a professional lifestyle photograph."
         )
 
     async def _create_task(
