@@ -348,7 +348,7 @@ async def process_magic_photo(message: types.Message, state: FSMContext):
         
         create_url = "https://api.kie.ai/api/v1/jobs/createTask"
         payload = {
-            "model": "NanoBanana",
+            "model": "nano-banana", # ИСПРАВЛЕНИЕ: строгое системное имя модели
             "input": {
                 "prompt": prompt_text,
                 "image_input": [data_uri],
