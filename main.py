@@ -30,7 +30,7 @@ kie_ai = KieService(os.getenv('KIE_API_KEY'))
 
 CATALOG = []
 SETTINGS = {}
-STAGES = ["model_group", "memory", "color", "sim", "region"]
+STAGES = ["model_group", "memory", "memory_ssd", "color", "sim", "region"]
 
 # Браузерный UA — без него Apple CDN и другие хосты отдают 403
 FETCH_HEADERS = {
@@ -224,7 +224,8 @@ async def run_step(callback, state, filters, idx):
 
     STEP_LABELS = {
         "model_group": "модель",
-        "memory":      "память",
+        "memory":      "память / RAM",
+        "memory_ssd":  "SSD",
         "color":       "цвет",
         "sim":         "тип SIM",
         "region":      "регион",
