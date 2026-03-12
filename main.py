@@ -225,15 +225,11 @@ async def run_step(callback, state, filters, idx):
     # Метка шага "memory" зависит от категории:
     # Watch/AirPods → размер, Mac → RAM, остальные → память
     cat = filters.get("cat", "")
-    _mem_label = (
-        "размер"    if cat in ("Watch", "AirPods")
-        else "RAM"  if cat == "Mac"
-        else "память"
-    )
+    _mem_label = "размер" if cat in ("Watch", "AirPods") else "память"
     STEP_LABELS = {
         "model_group": "модель",
         "memory":      _mem_label,
-        "memory_ssd":  "SSD",
+        "memory_ssd":  "RAM",
         "color":       "цвет",
         "sim":         "тип SIM",
         "region":      "регион",
@@ -289,11 +285,7 @@ async def finalize(callback, item, state):
     memory_safe  = html.escape(str(item.get('memory', '-')))
     memory_ssd_safe = html.escape(str(item.get('memory_ssd', '-')))
     _cat = str(item.get('model_group', '')).lower()
-    _mem_icon_label = (
-        "📐 Размер"  if any(k in _cat for k in ("watch", "airpods"))
-        else "🧠 RAM" if any(k in _cat for k in ("mac", "imac"))
-        else "💾 Память"
-    )
+    _mem_icon_label = "📐 Размер" if any(k in _cat for k in ("watch", "airpods")) else "💾 Память"
     color_safe  = html.escape(str(item.get('color', '-')))
     sim_safe    = html.escape(str(item.get('sim', '-')))
     region_safe = html.escape(str(item.get('region', '-')))
@@ -301,7 +293,7 @@ async def finalize(callback, item, state):
     text = (
         f"✅ <b>{title_safe}</b>\n\n"
         f"{_mem_icon_label}: {memory_safe}\n"
-        + (f"💿 SSD: {memory_ssd_safe}\n" if memory_ssd_safe != "-" else "")
+        + (f"🧠 RAM: {memory_ssd_safe}\n" if memory_ssd_safe != "-" else "")
         + f"🎨 Цвет: {color_safe}\n"
         + (f"📡 SIM: {sim_safe}\n" if sim_safe != "-" else "")
         + f"🌍 Регион: {region_safe}\n\n"
