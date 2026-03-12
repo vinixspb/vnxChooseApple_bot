@@ -222,9 +222,17 @@ async def run_step(callback, state, filters, idx):
 
     await state.update_data(filters=filters, idx=idx, val_map=val_map)
 
+    # Метка шага "memory" зависит от категории:
+    # Watch/AirPods → размер, Mac → RAM, остальные → память
+    cat = filters.get("cat", "")
+    _mem_label = (
+        "размер"    if cat in ("Watch", "AirPods")
+        else "RAM"  if cat == "Mac"
+        else "память"
+    )
     STEP_LABELS = {
         "model_group": "модель",
-        "memory":      "память / RAM",
+        "memory":      _mem_label,
         "memory_ssd":  "SSD",
         "color":       "цвет",
         "sim":         "тип SIM",
@@ -278,17 +286,25 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
 async def finalize(callback, item, state):
     title_safe  = html.escape(str(item.get('title', '')))
     price_safe  = html.escape(str(item.get('price', '')))
-    memory_safe = html.escape(str(item.get('memory', '-')))
+    memory_safe  = html.escape(str(item.get('memory', '-')))
+    memory_ssd_safe = html.escape(str(item.get('memory_ssd', '-')))
+    _cat = str(item.get('model_group', '')).lower()
+    _mem_icon_label = (
+        "📐 Размер"  if any(k in _cat for k in ("watch", "airpods"))
+        else "🧠 RAM" if any(k in _cat for k in ("mac", "imac"))
+        else "💾 Память"
+    )
     color_safe  = html.escape(str(item.get('color', '-')))
     sim_safe    = html.escape(str(item.get('sim', '-')))
     region_safe = html.escape(str(item.get('region', '-')))
 
     text = (
         f"✅ <b>{title_safe}</b>\n\n"
-        f"💾 Память: {memory_safe}\n"
-        f"🎨 Цвет: {color_safe}\n"
-        f"📡 SIM: {sim_safe}\n"
-        f"🌍 Регион: {region_safe}\n\n"
+        f"{_mem_icon_label}: {memory_safe}\n"
+        + (f"💿 SSD: {memory_ssd_safe}\n" if memory_ssd_safe != "-" else "")
+        + f"🎨 Цвет: {color_safe}\n"
+        + (f"📡 SIM: {sim_safe}\n" if sim_safe != "-" else "")
+        + f"🌍 Регион: {region_safe}\n\n"
         f"💰 <b>Цена: {price_safe} ₽</b>\n\n"
         "Заявка создана! Менеджер свяжется с вами.\n\n"
         "✨ <b>Хотите магию?</b> Нажми кнопку и отправь своё фото!"
