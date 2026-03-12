@@ -161,42 +161,84 @@ async def run_step(callback, state, filters, idx):
     if not data:
         return await callback.message.answer("❌ Нет в наличии", reply_markup=get_main_menu())
 
+    # Диагностика — видим что реально в данных
+    if data and idx < len(STAGES):
+        step_dbg = STAGES[idx]
+        vals_dbg = list(set(d.get(step_dbg, "?") for d in data[:5]))
+        logger.info(
+            f"run_step idx={idx} step={step_dbg} rows={len(data)} "
+            f"vals_sample={vals_dbg} "
+            f"model_group_sample={data[0].get('model_group','?')}"
+        )
+
     if idx >= len(STAGES):
         return await finalize(callback, data[0], state)
 
     step_name = STAGES[idx]
-    vals = sorted(list(set(d[step_name] for d in data if d.get(step_name))))
+    vals_raw = [str(d[step_name]).strip() for d in data if d.get(step_name) and str(d[step_name]).strip()]
+    vals = sorted(list(set(vals_raw)))
 
-    # Пропускаем шаг если единственное значение — прочерк
+    # Автопропуск: единственный прочерк
     if len(vals) == 1 and vals[0] == "-":
         filters[step_name] = "-"
+        logger.info(f"run_step: auto-skip {step_name} — single dash")
         return await run_step(callback, state, filters, idx + 1)
 
-    # Регион: пропускаем если вариант всего один (незачем спрашивать)
-    if step_name == "region" and len(vals) == 1:
-        filters[step_name] = vals[0]
+    # Автопропуск: регион если вариант один
+    if step_name == "region" and len(vals) <= 1:
+        filters[step_name] = vals[0] if vals else "-"
+        logger.info(f"run_step: auto-skip region — single value: {filters[step_name]}")
+        return await run_step(callback, state, filters, idx + 1)
+
+    # Автопропуск: любой НЕ-model_group шаг с единственным реальным значением
+    real_vals = [v for v in vals if v != "-"]
+    if step_name != "model_group" and len(real_vals) == 1:
+        filters[step_name] = real_vals[0]
+        logger.info(f"run_step: auto-skip {step_name} — single real value: {real_vals[0]}")
         return await run_step(callback, state, filters, idx + 1)
 
     val_map = {}
     kb_list = []
-    for i, v in enumerate(vals):
-        if v == "-":
-            continue
+    for i, v in enumerate(real_vals):
         key = str(i)
         val_map[key] = v
-        kb_list.append((key, v))
+
+        # Для шага памяти показываем минимальную цену в кнопке
+        if step_name == "memory":
+            prices = []
+            for row in data:
+                if row.get("memory") == v:
+                    try:
+                        p = int(str(row.get("price", "0")).replace(" ", "").replace(",", ""))
+                        if p > 0:
+                            prices.append(p)
+                    except ValueError:
+                        pass
+            label = f"{v}  —  от {min(prices):,} ₽".replace(",", " ") if prices else v
+        else:
+            label = v
+
+        kb_list.append((key, label))
 
     await state.update_data(filters=filters, idx=idx, val_map=val_map)
 
+    STEP_LABELS = {
+        "model_group": "модель",
+        "memory":      "память",
+        "color":       "цвет",
+        "sim":         "тип SIM",
+        "region":      "регион",
+    }
+
     already_selected = "\n".join(
-        f"▪️ {STAGES[i]}: <b>{html.escape(str(filters[STAGES[i]]))}</b>"
+        f"▪️ {STEP_LABELS.get(STAGES[i], STAGES[i])}: <b>{html.escape(str(filters[STAGES[i]]))}</b>"
         for i in range(idx)
         if filters.get(STAGES[i], "-") != "-"
     )
     text = (
         f"📦 <b>{html.escape(filters['cat'])}</b>\n"
         f"{already_selected}\n\n"
-        f"👇 Выберите <b>{html.escape(step_name)}</b>:"
+        f"👇 Выберите <b>{STEP_LABELS.get(step_name, step_name)}</b>:"
     )
 
     stub_url = get_stub(filters["cat"], filters.get("model_group", ""))
