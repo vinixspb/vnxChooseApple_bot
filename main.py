@@ -30,7 +30,7 @@ kie_ai = KieService(os.getenv('KIE_API_KEY'))
 
 CATALOG = []
 SETTINGS = {}
-STAGES = ["model_group", "memory", "sim", "color"]
+STAGES = ["model_group", "memory", "color", "sim", "region"]
 
 # Браузерный UA — без него Apple CDN и другие хосты отдают 403
 FETCH_HEADERS = {
@@ -167,8 +167,14 @@ async def run_step(callback, state, filters, idx):
     step_name = STAGES[idx]
     vals = sorted(list(set(d[step_name] for d in data if d.get(step_name))))
 
+    # Пропускаем шаг если единственное значение — прочерк
     if len(vals) == 1 and vals[0] == "-":
         filters[step_name] = "-"
+        return await run_step(callback, state, filters, idx + 1)
+
+    # Регион: пропускаем если вариант всего один (незачем спрашивать)
+    if step_name == "region" and len(vals) == 1:
+        filters[step_name] = vals[0]
         return await run_step(callback, state, filters, idx + 1)
 
     val_map = {}
