@@ -21,6 +21,7 @@ from services.sheets_manager import get_data_from_sheet, get_settings
 from services.kie_service import KieService
 from services.assistant_service import get_assistant_reply, trim_history
 from keyboards import get_main_menu, get_dynamic_keyboard
+from services.messages import MSG, BTN, MAGIC_MESSAGES
 
 load_dotenv()
 MANAGER_ID = os.getenv('MANAGER_ID')
@@ -136,7 +137,7 @@ logger = logging.getLogger(__name__)
 async def cmd_reset(message: types.Message, state: FSMContext):
     await state.clear()
     await load_all()
-    await message.answer("🔄 Каталог обновлён!", reply_markup=get_main_menu())
+    await message.answer(MSG["reload_done"], reply_markup=get_main_menu())
 
 
 @dp.message(Command("ai"))
@@ -148,8 +149,7 @@ async def cmd_ai(message: types.Message, state: FSMContext):
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "👋 Добро пожаловать в <b>vnxSHOP</b>!\n"
-        "Выберите категорию или спросите совета у Андрей.ai 👇",
+MSG["welcome"],
         reply_markup=get_main_menu()
     )
 
@@ -351,9 +351,9 @@ async def finalize(callback, item, state):
     )
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data="confirm_order"))
-    kb.row(InlineKeyboardButton(text="📸 AI магия",          callback_data="magic_tryon"))
-    kb.row(InlineKeyboardButton(text="⬅️ Меню",              callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text=BTN["confirm_order"], callback_data="confirm_order"))
+    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
+    kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
 
     image_url = item.get('image', '')
     photo_url = image_url if image_url.startswith("http") else get_stub(item.get('model_group', ''))
@@ -398,18 +398,10 @@ async def _launch_assistant(target, state: FSMContext):
     await state.update_data(chat_history=[])
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="❌ Завершить консультацию", callback_data="exit_assistant"))
+    kb.row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
 
-    greeting = (
-        "👋 Добро пожаловать! Я — <b>Андрей.ai</b>\n"
-        "<i>цифровая версия Андрея, эксперта vnxSHOP</i>\n\n"
-        "Помогу подобрать технику Apple именно под вас — "
-        "так же, как это делает Андрей лично для каждого клиента.\n\n"
-        "🙏 <b>Подскажите, какой у вас примерный бюджет?</b>"
-    )
-    # target может быть Message или CallbackQuery
     msg = target.message if hasattr(target, 'message') else target
-    await msg.answer(greeting, reply_markup=kb.as_markup())
+    await msg.answer(MSG["assistant_greeting"], reply_markup=kb.as_markup())
 
 
 @dp.callback_query(F.data == "start_assistant")
@@ -421,11 +413,7 @@ async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "exit_assistant")
 async def exit_assistant(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    farewell = (
-        "👍 Выходим из чата с Андрей.ai.\n"
-        "Захочешь вернуться — жми кнопку в меню!"
-    )
-    await callback.message.answer(farewell, reply_markup=get_main_menu())
+    await callback.message.answer(MSG["assistant_exit"], reply_markup=get_main_menu())
     await callback.answer()
 
 
@@ -452,7 +440,7 @@ async def assistant_message(message: types.Message, state: FSMContext):
     await state.update_data(chat_history=history)
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main"))
     kb.row(InlineKeyboardButton(text="❌ Выйти из чата",     callback_data="exit_assistant"))
 
     await message.answer(reply, reply_markup=kb.as_markup())
@@ -469,8 +457,8 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer("✅ Заказ подтверждён!")
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📸 AI магия", callback_data="magic_tryon"))
-    kb.row(InlineKeyboardButton(text="⬅️ Меню",     callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
+    kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
 
     try:
         await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
@@ -494,21 +482,7 @@ async def magic_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 # Юморные сообщения пока идёт генерация — меняем каждые 5 секунд
-MAGIC_MESSAGES = [
-    "⌛️ Колдуем...",
-    "📐 Проектируем идеальный хват под вашу руку...",
-    "🎨 Выбираем цвет, который подчёркивает ваш характер...",
-    "🔬 Рассчитываем оптимальное расположение камер на задней стенке...",
-    "✨ Наносим финишный антибликовый слой...",
-    "🪄 Калибруем магнитный коннектор под вашу ауру...",
-    "💅 Полируем грани до зеркального блеска...",
-    "📡 Согласовываем частоты с ближайшей вышкой 5G...",
-    "🧬 Синхронизируем чип с вашей биометрией...",
-    "🌈 Применяем фирменный эффект Apple Glow™...",
-    "🎭 Добавляем индивидуальности в каждый пиксель...",
-    "🔭 Финальная проверка всех 48 мегапикселей...",
-    "🎁 Упаковываем результат в фирменную коробочку...",
-]
+# MAGIC_MESSAGES — см. texts/messages.py
 
 
 async def _animate_magic_msg(msg, stop_event: asyncio.Event):
@@ -639,7 +613,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
         return
 
     # Показываем что расслышали
-    await message.answer(f"🎙 <i>Распознал: «{html.escape(user_text)}»</i>")
+    await message.answer(MSG["voice_recognized"].format(text=html.escape(user_text)))
 
     # Переключаем в режим консультации и обрабатываем как текст
     current_state = await state.get_state()
@@ -661,7 +635,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
     await state.update_data(chat_history=history)
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main"))
     kb.row(InlineKeyboardButton(text="❌ Выйти из чата",     callback_data="exit_assistant"))
     await message.answer(reply, reply_markup=kb.as_markup())
 
@@ -672,8 +646,7 @@ async def handle_photo_wrong_state(message: types.Message, state: FSMContext):
     current = await state.get_state()
     if current == ProductSelection.consulting:
         await message.answer(
-            "📸 Отличный выбор — AI магия это что-то! Но сначала выберите девайс в каталоге, "
-            "и там появится кнопка <b>📸 AI магия</b> 😊"
+            MSG["photo_in_consulting"]
         )
     else:
         await message.answer(
@@ -712,8 +685,8 @@ async def handle_free_text(message: types.Message, state: FSMContext):
     await state.update_data(chat_history=history)
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
-    kb.row(InlineKeyboardButton(text="❌ Завершить консультацию", callback_data="exit_assistant"))
+    kb.row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
     await message.answer(reply, reply_markup=kb.as_markup())
 
 
