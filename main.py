@@ -30,7 +30,7 @@ kie_ai = KieService(os.getenv('KIE_API_KEY'))
 
 CATALOG = []
 SETTINGS = {}
-STAGES = ["model_group", "memory", "memory_ssd", "color", "sim", "region"]
+STAGES = ["model_group", "size", "memory", "memory_ram", "color", "sim"]
 
 # Браузерный UA — без него Apple CDN и другие хосты отдают 403
 FETCH_HEADERS = {
@@ -203,6 +203,18 @@ async def run_step(callback, state, filters, idx):
         key = str(i)
         val_map[key] = v
 
+        # Для SIM — человеческие названия
+        if step_name == "sim":
+            sim_labels = {
+                "eSim":       "eSIM + eSIM",
+                "Dual eSim":  "eSIM + eSIM",
+                "Nano+eSim":  "Физическая SIM + eSIM",
+                "Nano+nano":  "Физическая SIM + Физическая SIM",
+            }
+            label = sim_labels.get(v, v)
+            kb_list.append((key, label))
+            continue
+
         # Для шага памяти показываем минимальную цену в кнопке
         if step_name == "memory":
             prices = []
@@ -222,14 +234,11 @@ async def run_step(callback, state, filters, idx):
 
     await state.update_data(filters=filters, idx=idx, val_map=val_map)
 
-    # Метка шага "memory" зависит от категории:
-    # Watch/AirPods → размер, Mac → RAM, остальные → память
-    cat = filters.get("cat", "")
-    _mem_label = "размер" if cat in ("Watch", "AirPods") else "память"
     STEP_LABELS = {
         "model_group": "модель",
-        "memory":      _mem_label,
-        "memory_ssd":  "RAM",
+        "size":        "размер",   # диагональ / mm / Pro
+        "memory":      "память",   # хранилище: 256GB / 1TB
+        "memory_ram":  "RAM",      # ОЗУ: только для Mac
         "color":       "цвет",
         "sim":         "тип SIM",
         "region":      "регион",
@@ -282,20 +291,20 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
 async def finalize(callback, item, state):
     title_safe  = html.escape(str(item.get('title', '')))
     price_safe  = html.escape(str(item.get('price', '')))
-    memory_safe  = html.escape(str(item.get('memory', '-')))
-    memory_ssd_safe = html.escape(str(item.get('memory_ssd', '-')))
-    _cat = str(item.get('model_group', '')).lower()
-    _mem_icon_label = "📐 Размер" if any(k in _cat for k in ("watch", "airpods")) else "💾 Память"
+    size_safe       = html.escape(str(item.get('size', '-')))
+    memory_safe     = html.escape(str(item.get('memory', '-')))
+    memory_ram_safe = html.escape(str(item.get('memory_ram', '-')))
     color_safe  = html.escape(str(item.get('color', '-')))
     sim_safe    = html.escape(str(item.get('sim', '-')))
     region_safe = html.escape(str(item.get('region', '-')))
 
     text = (
         f"✅ <b>{title_safe}</b>\n\n"
-        f"{_mem_icon_label}: {memory_safe}\n"
-        + (f"🧠 RAM: {memory_ssd_safe}\n" if memory_ssd_safe != "-" else "")
+        + (f"📐 Размер: {size_safe}\n"       if size_safe != "-"       else "")
+        + (f"💾 Память: {memory_safe}\n"      if memory_safe != "-"     else "")
+        + (f"🧠 RAM: {memory_ram_safe}\n"     if memory_ram_safe != "-" else "")
         + f"🎨 Цвет: {color_safe}\n"
-        + (f"📡 SIM: {sim_safe}\n" if sim_safe != "-" else "")
+        + (f"📡 SIM: {sim_safe}\n"            if sim_safe != "-"        else "")
         + f"🌍 Регион: {region_safe}\n\n"
         f"💰 <b>Цена: {price_safe} ₽</b>\n\n"
         "Заявка создана! Менеджер свяжется с вами.\n\n"
@@ -303,8 +312,9 @@ async def finalize(callback, item, state):
     )
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="📸 AI магия", callback_data="magic_tryon"))
-    kb.row(InlineKeyboardButton(text="⬅️ Меню", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text="✅ Подтвердить заказ", callback_data="confirm_order"))
+    kb.row(InlineKeyboardButton(text="📸 AI магия",          callback_data="magic_tryon"))
+    kb.row(InlineKeyboardButton(text="⬅️ Меню",              callback_data="back_to_main"))
 
     image_url = item.get('image', '')
     photo_url = image_url if image_url.startswith("http") else get_stub(item.get('model_group', ''))
@@ -337,6 +347,33 @@ async def finalize(callback, item, state):
             f"(@{html.escape(user.username or 'Скрыт')})"
         )
         await bot.send_message(MANAGER_ID, m_text)
+
+
+# ─────────────────────── ПОДТВЕРЖДЕНИЕ ЗАКАЗА ───────────────────────
+
+@dp.callback_query(F.data == "confirm_order")
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Кнопка 'Подтвердить заказ'.
+    Сейчас менеджер уже уведомлён в finalize() — здесь просто подтверждаем пользователю.
+    В будущем: уведомлять менеджера только здесь, убрав из finalize.
+    """
+    await callback.answer("✅ Заказ подтверждён!")
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📸 AI магия", callback_data="magic_tryon"))
+    kb.row(InlineKeyboardButton(text="⬅️ Меню",     callback_data="back_to_main"))
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except Exception:
+        pass
+
+    await callback.message.answer(
+        "🎉 <b>Заказ принят!</b>\n\n"
+        "Менеджер свяжется с вами в ближайшее время. "
+        "Если хотите — попробуйте <b>AI магию</b> 👇"
+    )
 
 
 # ─────────────────────── AI МАГИЯ ───────────────────────
