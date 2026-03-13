@@ -19,8 +19,6 @@ _REGION_MAP = {
 }
 
 # ─── Категории которые используют size как память ────────────────────────────
-# Для Mac: size = RAM, memory_ssd = SSD (кастомный столбец в конце таблицы)
-# Для iPhone/iPad/Watch/AirPods: size = объём хранилища
 _MAC_KEYWORDS = {"mac", "imac", "macbook", "mac mini", "mac pro", "mac studio"}
 
 
@@ -94,15 +92,8 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP", retries: int = 3) -> List[D
 
                 color  = str(row.get("color", "")).strip() or "-"
                 sim    = str(row.get("sim",   "")).strip() or "-"
-                region = _extract_region(row)
-
-                # ── Стандартный столбец size — физический размер ─────────────
-                # iPhone:      пусто / "-"
-                # iPad:        11" / 13"
-                # Mac/MacBook: 14" / 16"
-                # iMac:        24"
-                # Watch:       41mm / 45mm
-                # AirPods:     Pro / 4 / Max
+                
+                # Физический размер (диагональ / mm)
                 size_val = str(row.get("size", "")).strip() or "-"
 
                 # ── Кастомные столбцы в конце таблицы ─────────────────────
@@ -121,19 +112,19 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP", retries: int = 3) -> List[D
                 custom_label_2 = str(row.get("custom_label_2", "")).strip() or "-"
 
                 entry = {
-                    "id":           str(row.get("id", "")).strip(),
-                    "title":        str(row.get("title", "")).strip(),
-                    "availability": str(row.get("availability", "out of stock")).strip(),
-                    "price":        price,
-                    "image":        str(row.get("image_link", "")).strip(),
-                    "color":        color,
-                    "size":         size_val,    # физический размер (диагональ / mm)
-                    "memory":       memory_ssd,  # хранилище (256GB / 512GB / 1TB)
-                    "memory_ssd":   memory_ssd,
-                    "memory_ram":   memory_ram,  # ОЗУ только для Mac
-                    "sim":          sim,
-                    "model_group":  model_group,
-                    "region":       custom_label_0,   # регион из custom_label_0
+                    "id":             str(row.get("id", "")).strip(),
+                    "title":          str(row.get("title", "")).strip(),
+                    "availability":   str(row.get("availability", "out of stock")).strip(),
+                    "price":          price,
+                    "image":          str(row.get("image_link", "")).strip(),
+                    "color":          color,
+                    "size":           size_val,
+                    "memory":         memory_ssd,  # Главный ключ для воронки, берет данные из memory_ssd
+                    "memory_ssd":     memory_ssd,
+                    "memory_ram":     memory_ram,
+                    "sim":            sim,
+                    "model_group":    model_group,
+                    "region":         custom_label_0,
                     "custom_label_0": custom_label_0,
                     "custom_label_1": custom_label_1,
                     "custom_label_2": custom_label_2,
@@ -142,7 +133,6 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP", retries: int = 3) -> List[D
 
             logger.info(
                 f"Sheets: загружено {len(cleaned)} строк. "
-                f"Пример: { {k: cleaned[0][k] for k in ['model_group','size','memory','memory_ram','color','sim','region']} if cleaned else 'пусто' }"
             )
             return cleaned
 
