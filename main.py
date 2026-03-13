@@ -1,11 +1,12 @@
+import os
 import asyncio
 import html
 import logging
-import os
 import random
 import aiohttp
+
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
@@ -22,7 +23,7 @@ from services.kie_service import KieService
 from services.assistant_service import get_assistant_reply, trim_history
 from keyboards import get_main_menu, get_dynamic_keyboard
 from services.messages import MSG, BTN, MAGIC_MESSAGES
-from aiogram.filters import Command
+
 
 
 load_dotenv()
