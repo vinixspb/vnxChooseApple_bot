@@ -197,6 +197,23 @@ async def run_step(callback, state, filters, idx):
         return await finalize(callback, data[0], state)
 
     step_name = STAGES[idx]
+
+    # ── Категориезависимый пропуск шагов ────────────────────────────────────
+    # iPhone:  size (нет физического размера), memory_ram (нет ОЗУ-выбора)
+    # AirPods: size, sim, memory_ram
+    # Watch:   sim, memory_ram, memory (нет хранилища)
+    cat = filters.get("cat", "").lower()
+    SKIP_BY_CAT = {
+        "iphone":  {"size", "memory_ram"},
+        "airpods": {"size", "sim", "memory_ram"},
+        "watch":   {"size", "sim", "memory_ram", "memory"},
+    }
+    if step_name in SKIP_BY_CAT.get(cat, set()):
+        filters[step_name] = "-"
+        logger.info(f"run_step: category-skip {step_name} для {cat}")
+        return await run_step(callback, state, filters, idx + 1)
+    # ────────────────────────────────────────────────────────────────────────
+
     vals_raw = [str(d[step_name]).strip() for d in data if d.get(step_name) and str(d[step_name]).strip()]
     vals = sorted(list(set(vals_raw)))
 
