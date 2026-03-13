@@ -15,13 +15,7 @@ from services.kie_service import KieService
 from services.messages import MSG, BTN, MAGIC_MESSAGES
 from keyboards import get_main_menu
 from utils.media import fetch_image_bytes
-from aiogram.filters import Command, StateFilter
-from aiogram.enums import ChatAction
-from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-from states.product_states import ProductSelection
 
 
 router = Router()
