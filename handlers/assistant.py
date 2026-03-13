@@ -31,7 +31,7 @@ async def _launch_assistant(target, state: FSMContext):
 async def cmd_ai(message: types.Message, state: FSMContext):
     await _launch_assistant(message, state)
 
-@router.callback_query(F.data == "start_assistant")
+@router.callback_query(F.data == "start_consulting")
 async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
     await _launch_assistant(callback, state)
     await callback.answer()
