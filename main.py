@@ -2,18 +2,21 @@
 import asyncio
 import logging
 import os
+from dotenv import load_dotenv
+
+# 1. СНАЧАЛА импортируем и вызываем load_dotenv
+load_dotenv()
+
+# 2. ЗАТЕМ импортируем aiogram
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
-from dotenv import load_dotenv
 
-# Импортируем наши новые модули (роутеры)
+# 3. И ТОЛЬКО ТЕПЕРЬ импортируем наши роутеры (которые при импорте полезут искать ключи в os.getenv)
 from handlers import catalog, assistant, magic
 from handlers.catalog import load_all
 
-# Загружаем переменные окружения (токены, ключи)
-load_dotenv()
 
 async def set_bot_commands(bot: Bot):
     """
