@@ -9,7 +9,10 @@ from aiogram.filters import Command
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InputMediaPhoto, BufferedInputFile
+from aiogram.types import (
+    InlineKeyboardButton, InputMediaPhoto, BufferedInputFile,
+    BotCommand, BotCommandScopeDefault, MenuButtonCommands,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -126,12 +129,30 @@ async def send_photo_safe(
 logger = logging.getLogger(__name__)
 
 
+
 # ─────────────────────── ХЕНДЛЕРЫ ───────────────────────
+
+@dp.message(Command("reset"))
+async def cmd_reset(message: types.Message, state: FSMContext):
+    await state.clear()
+    await load_all()
+    await message.answer("🔄 Каталог обновлён!", reply_markup=get_main_menu())
+
+
+@dp.message(Command("ai"))
+async def cmd_ai(message: types.Message, state: FSMContext):
+    await _launch_assistant(message, state)
+
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("👋 Добро пожаловать в <b>vnxSHOP</b>!", reply_markup=get_main_menu())
+    await message.answer(
+        "👋 Добро пожаловать в <b>vnxSHOP</b>!\n"
+        "Выберите категорию или спросите совета у Андрей.ai 👇",
+        reply_markup=get_main_menu()
+    )
+
 
 
 @dp.callback_query(F.data == "back_to_main")
@@ -353,24 +374,30 @@ async def finalize(callback, item, state):
 
 # ─────────────────────── АНДРЕЙ.AI КОНСУЛЬТАНТ ───────────────────────
 
-@dp.callback_query(F.data == "start_assistant")
-async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
+async def _launch_assistant(target, state: FSMContext):
+    """Общая функция запуска Андрей.ai — из callback, команды или текста."""
     await state.clear()
     await state.set_state(ProductSelection.consulting)
     await state.update_data(chat_history=[])
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="❌ Выйти из чата", callback_data="exit_assistant"))
+    kb.row(InlineKeyboardButton(text="❌ Завершить консультацию", callback_data="exit_assistant"))
 
     greeting = (
-        "👋 Привет! Я — <b>Андрей.ai</b>, цифровая субличность Андрея.\n\n"
-        "Оригинал сейчас занят, но я знаю про Apple всё то же самое — "
-        "и шутки у нас одинаковые 😄\n\n"
-        "Помогу выбрать технику так, как Андрей делает это лично. "
-        "Просто напиши что интересует — начнём! \n\n"
+        "👋 Добро пожаловать! Я — <b>Андрей.ai</b>\n"
+        "<i>цифровая версия Андрея, эксперта vnxSHOP</i>\n\n"
+        "Помогу подобрать технику Apple именно под вас — "
+        "так же, как это делает Андрей лично для каждого клиента.\n\n"
         "🙏 <b>Подскажите, какой у вас примерный бюджет?</b>"
     )
-    await callback.message.answer(greeting, reply_markup=kb.as_markup())
+    # target может быть Message или CallbackQuery
+    msg = target.message if hasattr(target, 'message') else target
+    await msg.answer(greeting, reply_markup=kb.as_markup())
+
+
+@dp.callback_query(F.data == "start_assistant")
+async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
+    await _launch_assistant(callback, state)
     await callback.answer()
 
 
@@ -549,11 +576,146 @@ async def magic_process(message: types.Message, state: FSMContext):
         await state.clear()
 
 
+
+@dp.message(F.voice)
+async def handle_voice(message: types.Message, state: FSMContext):
+    """
+    Голосовое сообщение → транскрибируем через Whisper (OpenAI API).
+    Если ключа нет — просим написать текстом.
+    """
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_key:
+        await message.answer(
+            "🎙 Голосовые сообщения пока в разработке.\n"
+            "Напиши вопрос текстом — отвечу так же быстро! 😊"
+        )
+        return
+
+    await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+
+    # Скачиваем файл
+    voice_file = await message.bot.get_file(message.voice.file_id)
+    file_bytes = await message.bot.download_file(voice_file.file_path)
+
+    # Транскрибируем через Whisper
+    try:
+        async with aiohttp.ClientSession() as session:
+            data = aiohttp.FormData()
+            data.add_field("file", file_bytes, filename="voice.ogg", content_type="audio/ogg")
+            data.add_field("model", "whisper-1")
+            data.add_field("language", "ru")
+            async with session.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {openai_key}"},
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                result = await resp.json()
+                user_text = result.get("text", "").strip()
+    except Exception as e:
+        logger.error(f"Whisper error: {e}")
+        await message.answer("🎙 Не удалось распознать голос. Напиши текстом — отвечу сразу!")
+        return
+
+    if not user_text:
+        await message.answer("🎙 Не удалось распознать. Попробуй написать текстом!")
+        return
+
+    # Показываем что расслышали
+    await message.answer(f"🎙 <i>Распознал: «{html.escape(user_text)}»</i>")
+
+    # Переключаем в режим консультации и обрабатываем как текст
+    current_state = await state.get_state()
+    if current_state != ProductSelection.consulting:
+        await state.set_state(ProductSelection.consulting)
+        await state.update_data(chat_history=[])
+
+    fsm_data = await state.get_data()
+    history = fsm_data.get("chat_history", [])
+
+    reply = await get_assistant_reply(
+        user_message=user_text,
+        history=history,
+        catalog=CATALOG,
+    )
+    history.append({"role": "user",      "content": user_text})
+    history.append({"role": "assistant", "content": reply})
+    history = trim_history(history)
+    await state.update_data(chat_history=history)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text="❌ Выйти из чата",     callback_data="exit_assistant"))
+    await message.answer(reply, reply_markup=kb.as_markup())
+
+
+@dp.message(F.photo, ~ProductSelection.waiting_for_magic_photo)
+async def handle_photo_wrong_state(message: types.Message, state: FSMContext):
+    """Фото вне режима AI-магии — подсказываем что нужно сначала выбрать девайс."""
+    current = await state.get_state()
+    if current == ProductSelection.consulting:
+        await message.answer(
+            "📸 Отличный выбор — AI магия это что-то! Но сначала выберите девайс в каталоге, "
+            "и там появится кнопка <b>📸 AI магия</b> 😊"
+        )
+    else:
+        await message.answer(
+            "📸 Хочешь AI магию с твоим фото?\n"
+            "Сначала выбери девайс в каталоге — и там нажми <b>📸 AI магия</b>!"
+        )
+
+
+@dp.message(~ProductSelection.selecting, ~ProductSelection.waiting_for_magic_photo,
+            ~ProductSelection.consulting, F.text)
+async def handle_free_text(message: types.Message, state: FSMContext):
+    """
+    Любой текст вне состояний → автоматически запускаем Андрей.ai.
+    Исключение: кнопки Reply Keyboard (уже обработаны выше).
+    """
+    text = (message.text or "").strip()
+    # Reply-кнопки уже обработаны отдельными хендлерами выше
+    if text.startswith("🤖") or text.startswith("🏠") or text.startswith("🔄"):
+        return
+
+    # Запускаем приветствие ассистента, а потом сразу обрабатываем вопрос
+    await _launch_assistant(message, state)
+
+    await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+
+    reply = await get_assistant_reply(
+        user_message=text,
+        history=[],
+        catalog=CATALOG,
+    )
+
+    history = [
+        {"role": "user",      "content": text},
+        {"role": "assistant", "content": reply},
+    ]
+    await state.update_data(chat_history=history)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text="❌ Завершить консультацию", callback_data="exit_assistant"))
+    await message.answer(reply, reply_markup=kb.as_markup())
+
+
 # ─────────────────────── ЗАПУСК ───────────────────────
 
 async def main():
     logging.basicConfig(level=logging.INFO)
     logging.info("vnxChooseApple Bot Started")
+
+    # Устанавливаем команды (появятся в меню "/" слева внизу)
+    await bot.set_my_commands([
+        BotCommand(command="start",  description="🏠 Главное меню"),
+        BotCommand(command="reset",  description="🔄 Перезагрузить каталог"),
+        BotCommand(command="ai",     description="🤖 Андрей.ai — помочь с выбором"),
+    ], scope=BotCommandScopeDefault())
+
+    # Синяя кнопка слева внизу — показывает список команд
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
     await dp.start_polling(bot)
 
 
