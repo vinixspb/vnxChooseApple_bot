@@ -7,6 +7,7 @@ from aiogram import Router, F, types
 from aiogram.filters import Command, StateFilter
 from aiogram.enums import ChatAction
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from states.product_states import ProductSelection
@@ -21,7 +22,13 @@ logger = logging.getLogger(__name__)
 async def _launch_assistant(target, state: FSMContext):
     await state.clear()
     await state.set_state(ProductSelection.consulting)
-    await state.update_data(chat_history=[])
+    
+    # ЛЕЧИМ АМНЕЗИЮ: сразу записываем приветствие в историю ИИ
+    history = [
+        {"role": "assistant", "content": MSG["assistant_greeting"]}
+    ]
+    await state.update_data(chat_history=history)
+    
     kb = InlineKeyboardBuilder().row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
     msg = target.message if hasattr(target, 'message') else target
     await msg.answer(MSG["assistant_greeting"], reply_markup=kb.as_markup())
@@ -30,7 +37,8 @@ async def _launch_assistant(target, state: FSMContext):
 async def cmd_ai(message: types.Message, state: FSMContext):
     await _launch_assistant(message, state)
 
-@router.callback_query(F.data == "start_assistant")
+# ФИКС: Здесь теперь "start_consulting"
+@router.callback_query(F.data == "start_consulting")
 async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
     await _launch_assistant(callback, state)
     await callback.answer()
@@ -93,7 +101,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
 
     if await state.get_state() != ProductSelection.consulting:
         await state.set_state(ProductSelection.consulting)
-        await state.update_data(chat_history=[])
+        await state.update_data(chat_history=[{"role": "assistant", "content": MSG["assistant_greeting"]}])
 
     data = await state.get_data()
     history = data.get("chat_history", [])
@@ -110,7 +118,7 @@ async def handle_voice(message: types.Message, state: FSMContext):
 @router.message(~StateFilter(ProductSelection.selecting), ~StateFilter(ProductSelection.waiting_for_magic_photo), ~StateFilter(ProductSelection.consulting), F.text)
 async def handle_free_text(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
-    if text.startswith("🤖") or text.startswith("🏠") or text.startswith("🔄"): return
+    if text.startswith("🤖") or text.startswith("🏠") or text.startswith("🔄") or text.startswith("✨"): return
 
     await _launch_assistant(message, state)
     await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
