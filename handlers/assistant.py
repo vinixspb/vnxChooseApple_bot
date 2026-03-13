@@ -14,13 +14,7 @@ import services.data_store as store
 from services.assistant_service import get_assistant_reply, trim_history
 from services.messages import MSG, BTN
 from keyboards import get_main_menu
-from aiogram.filters import Command, StateFilter
-from aiogram.enums import ChatAction
-from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-from states.product_states import ProductSelection
 
 router = Router()
 logger = logging.getLogger(__name__)
