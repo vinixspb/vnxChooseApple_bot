@@ -486,18 +486,31 @@ async def magic_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 async def _animate_magic_msg(msg, stop_event: asyncio.Event):
-    """Меняет текст сообщения каждые 5 секунд пока идёт генерация."""
-    shown = {MAGIC_MESSAGES[0]}
-    pool = MAGIC_MESSAGES[1:]
+    """
+    Меняет текст сообщения каждые 5 секунд пока идёт генерация.
+    Первое сообщение — всегда MAGIC_MESSAGES[0] (уже показано при старте).
+    Второе — MAGIC_MESSAGES[1] по порядку.
+    Далее — случайный выбор из оставшихся без повторов.
+    """
+    pool = list(MAGIC_MESSAGES[1:])   # всё кроме первого
+    next_sequential = pool.pop(0)      # второе — по порядку
+    shown = set()
+    first_tick = True
     while not stop_event.is_set():
         await asyncio.sleep(5)
         if stop_event.is_set():
             break
-        remaining = [m for m in pool if m not in shown]
-        if not remaining:
-            remaining = pool  # пошли по второму кругу
-        pick = random.choice(remaining)
-        shown.add(pick)
+        if first_tick:
+            pick = next_sequential
+            shown.add(pick)
+            first_tick = False
+        else:
+            remaining = [m for m in pool if m not in shown]
+            if not remaining:
+                shown.clear()          # сбрасываем — идём по второму кругу
+                remaining = pool
+            pick = random.choice(remaining)
+            shown.add(pick)
         try:
             await msg.edit_text(pick)
         except Exception:
