@@ -14,7 +14,6 @@ import services.data_store as store
 from services.assistant_service import get_assistant_reply, trim_history
 from services.messages import MSG, BTN
 from keyboards import get_main_menu
-from aiogram.types import InlineKeyboardButton
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -31,7 +30,7 @@ async def _launch_assistant(target, state: FSMContext):
 async def cmd_ai(message: types.Message, state: FSMContext):
     await _launch_assistant(message, state)
 
-@router.callback_query(F.data == "start_consulting")
+@router.callback_query(F.data == "start_assistant")
 async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
     await _launch_assistant(callback, state)
     await callback.answer()
