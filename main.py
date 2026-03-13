@@ -22,6 +22,8 @@ from services.kie_service import KieService
 from services.assistant_service import get_assistant_reply, trim_history
 from keyboards import get_main_menu, get_dynamic_keyboard
 from services.messages import MSG, BTN, MAGIC_MESSAGES
+from aiogram.filters import Command
+
 
 load_dotenv()
 MANAGER_ID = os.getenv('MANAGER_ID')
