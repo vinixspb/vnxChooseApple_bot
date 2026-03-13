@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from states.product_states import ProductSelection
 from services.sheets_manager import get_data_from_sheet, get_settings
 from services.kie_service import KieService
+from services.assistant_service import get_assistant_reply, trim_history
 from keyboards import get_main_menu, get_dynamic_keyboard
 
 load_dotenv()
@@ -348,6 +349,69 @@ async def finalize(callback, item, state):
         )
         await bot.send_message(MANAGER_ID, m_text)
 
+
+
+# ─────────────────────── АНДРЕЙ.AI КОНСУЛЬТАНТ ───────────────────────
+
+@dp.callback_query(F.data == "start_assistant")
+async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(ProductSelection.consulting)
+    await state.update_data(chat_history=[])
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="❌ Выйти из чата", callback_data="exit_assistant"))
+
+    greeting = (
+        "👋 Привет! Я — <b>Андрей.ai</b>, цифровая субличность Андрея.\n\n"
+        "Оригинал сейчас занят, но я знаю про Apple всё то же самое — "
+        "и шутки у нас одинаковые 😄\n\n"
+        "Помогу выбрать технику так, как Андрей делает это лично. "
+        "Просто напиши что интересует — начнём! \n\n"
+        "🙏 <b>Подскажите, какой у вас примерный бюджет?</b>"
+    )
+    await callback.message.answer(greeting, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "exit_assistant")
+async def exit_assistant(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    farewell = (
+        "👍 Выходим из чата с Андрей.ai.\n"
+        "Захочешь вернуться — жми кнопку в меню!"
+    )
+    await callback.message.answer(farewell, reply_markup=get_main_menu())
+    await callback.answer()
+
+
+@dp.message(ProductSelection.consulting)
+async def assistant_message(message: types.Message, state: FSMContext):
+    user_text = (message.text or "").strip()
+    if not user_text:
+        return
+
+    data = await state.get_data()
+    history: list = data.get("chat_history", [])
+
+    await message.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+
+    reply = await get_assistant_reply(
+        user_message=user_text,
+        history=history,
+        catalog=CATALOG,
+    )
+
+    history.append({"role": "user",      "content": user_text})
+    history.append({"role": "assistant", "content": reply})
+    history = trim_history(history)
+    await state.update_data(chat_history=history)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="📱 Перейти в каталог", callback_data="back_to_main"))
+    kb.row(InlineKeyboardButton(text="❌ Выйти из чата",     callback_data="exit_assistant"))
+
+    await message.answer(reply, reply_markup=kb.as_markup())
 
 # ─────────────────────── ПОДТВЕРЖДЕНИЕ ЗАКАЗА ───────────────────────
 
