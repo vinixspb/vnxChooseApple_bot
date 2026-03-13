@@ -39,8 +39,13 @@ def extract_recommendations(reply: str, kb: InlineKeyboardBuilder):
             if item:
                 # Генерируем красивое название для кнопки
                 btn_text = f"👉 Смотреть: {item.get('title')} {item.get('memory', '')}".replace(" -", "").strip()
-                # callback_data ограничена 64 символами, обрезаем
-                cb_data = f"rec_{item_id}"[:60]
+                
+                # ФИКС: Telegram отклоняет callback_data длиннее 64 БАЙТ (кириллица весит больше).
+                # Безопасно обрезаем строку, пока она не станет легче 60 байт.
+                cb_data = f"rec_{item_id}"
+                while len(cb_data.encode('utf-8')) > 60:
+                    cb_data = cb_data[:-1]
+                    
                 kb.row(InlineKeyboardButton(text=btn_text, callback_data=cb_data))
                 
     return reply, kb
@@ -86,8 +91,10 @@ async def ai_pause(callback: types.CallbackQuery, state: FSMContext):
 # ─── НОВЫЙ ХЕНДЛЕР: Обработка клика по кнопке товара от ИИ ───
 @router.callback_query(F.data.startswith("rec_"))
 async def handle_recommendation_click(callback: types.CallbackQuery, state: FSMContext):
-    item_id = callback.data.replace("rec_", "")
-    item = next((x for x in store.CATALOG if str(x.get("id")) == item_id), None)
+    item_id_prefix = callback.data.replace("rec_", "")
+    
+    # ФИКС: Ищем товар по startswith, так как очень длинные ID мы обрезали в парсере кнопок
+    item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
     
     if item:
         await callback.answer("Загружаю карточку товара...")
