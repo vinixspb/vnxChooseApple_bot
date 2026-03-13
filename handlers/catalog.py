@@ -1,4 +1,3 @@
-# handlers/catalog.py
 import html
 import logging
 import os
@@ -49,11 +48,17 @@ async def start_category(callback: types.CallbackQuery, state: FSMContext):
     await run_step(callback, state, {"cat": cat}, 0)
 
 async def run_step(callback, state, filters, idx):
-    data = [i for i in store.CATALOG if filters["cat"].lower() in str(i["model_group"]).lower()]
+    data = [i for i in store.CATALOG if filters["cat"].lower() in str(i.get("model_group", "")).lower()]
+    
     for i in range(idx):
         stage = store.STAGES[i]
-        if stage in filters:
-            data = [d for d in data if d[stage] == filters[stage]]
+        if stage in filters and filters[stage] != "*SKIPPED*":
+            req_val = filters[stage]
+            data = [
+                d for d in data 
+                if str(d.get(stage, "")).strip() == req_val 
+                or (req_val == "-" and not str(d.get(stage, "")).strip())
+            ]
 
     if not data:
         return await callback.message.answer(MSG["out_of_stock"], reply_markup=get_main_menu())
@@ -62,23 +67,29 @@ async def run_step(callback, state, filters, idx):
         return await finalize(callback, data[0], state)
 
     step_name = store.STAGES[idx]
-
     cat = filters.get("cat", "").lower()
+    
+    # ─── ИДЕАЛЬНАЯ ЛОГИКА ПРОПУСКОВ ОТ АНДРЕЯ ───
     SKIP_BY_CAT = {
         "iphone":  {"size", "memory_ram"},
-        "airpods": {"size", "sim", "memory_ram"},
-        "watch":   {"size", "sim", "memory_ram", "memory"},
+        "ipad":    {"memory_ram"},
+        "mac":     {"sim"},
+        "watch":   {"memory_ram", "sim", "memory"},
+        "airpods": {"size", "memory_ram", "sim"}
     }
+    
     if step_name in SKIP_BY_CAT.get(cat, set()):
-        filters[step_name] = "-"
+        filters[step_name] = "*SKIPPED*"
         return await run_step(callback, state, filters, idx + 1)
 
-    vals_raw = [str(d[step_name]).strip() for d in data if d.get(step_name) and str(d[step_name]).strip()]
+    vals_raw = [str(d.get(step_name, "")).strip() for d in data]
+    vals_raw = ["-" if not v else v for v in vals_raw]
     vals = sorted(list(set(vals_raw)))
 
     if len(vals) == 1 and vals[0] == "-":
         filters[step_name] = "-"
         return await run_step(callback, state, filters, idx + 1)
+        
     if step_name == "region" and len(vals) <= 1:
         filters[step_name] = vals[0] if vals else "-"
         return await run_step(callback, state, filters, idx + 1)
@@ -102,9 +113,12 @@ async def run_step(callback, state, filters, idx):
         if step_name == "memory":
             prices = []
             for row in data:
-                if row.get("memory") == v:
+                m = str(row.get("memory", "")).strip()
+                if not m: m = "-"
+                if m == v:
                     try:
-                        p = int(str(row.get("price", "0")).replace(" ", "").replace(",", ""))
+                        p_str = str(row.get("price", "0")).replace(" ", "").replace(",", "")
+                        p = int(float(p_str))
                         if p > 0: prices.append(p)
                     except ValueError: pass
             label = f"{v}  —  от {min(prices):,} ₽".replace(",", " ") if prices else v
@@ -116,7 +130,15 @@ async def run_step(callback, state, filters, idx):
     await state.update_data(filters=filters, idx=idx, val_map=val_map)
 
     STEP_LABELS = {"model_group": "модель", "size": "размер", "memory": "память", "memory_ram": "RAM", "color": "цвет", "sim": "тип SIM", "region": "регион"}
-    already_selected = "\n".join(f"▪️ {STEP_LABELS.get(store.STAGES[i], store.STAGES[i])}: <b>{html.escape(str(filters[store.STAGES[i]]))}</b>" for i in range(idx) if filters.get(store.STAGES[i], "-") != "-")
+    
+    already_selected_lines = []
+    for i in range(idx):
+        stg = store.STAGES[i]
+        val = filters.get(stg, "-")
+        if val and val not in ["-", "*SKIPPED*"]:
+            already_selected_lines.append(f"▪️ {STEP_LABELS.get(stg, stg)}: <b>{html.escape(str(val))}</b>")
+            
+    already_selected = "\n".join(already_selected_lines)
     text = f"📦 <b>{html.escape(filters['cat'])}</b>\n{already_selected}\n\n👇 Выберите <b>{STEP_LABELS.get(step_name, step_name)}</b>:"
 
     stub_url = get_stub(filters["cat"], filters.get("model_group", ""))
@@ -145,15 +167,29 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
     await run_step(callback, state, filters, s["idx"] + 1)
 
 async def finalize(callback, item, state):
-    t, p, size, mem, ram, c, sim, reg = [html.escape(str(item.get(k, '-'))) for k in ['title', 'price', 'size', 'memory', 'memory_ram', 'color', 'sim', 'region']]
+    def norm(k):
+        v = str(item.get(k, '')).strip()
+        return html.escape(v) if v else "-"
+
+    t = html.escape(str(item.get('title', '')))
+    
+    # Красивое форматирование цены (100000 -> 100 000)
+    raw_p = str(item.get('price', '0'))
+    try:
+        p = f"{int(raw_p):,}".replace(",", " ")
+    except ValueError:
+        p = html.escape(raw_p)
+
+    size, mem, ram, c, sim, reg = [norm(k) for k in ['size', 'memory', 'memory_ram', 'color', 'sim', 'region']]
 
     text = (f"✅ <b>{t}</b>\n\n"
             + (f"📐 Размер: {size}\n" if size != "-" else "")
             + (f"💾 Память: {mem}\n" if mem != "-" else "")
             + (f"🧠 RAM: {ram}\n" if ram != "-" else "")
-            + f"🎨 Цвет: {c}\n"
+            + (f"🎨 Цвет: {c}\n" if c != "-" else "")
             + (f"📡 SIM: {sim}\n" if sim != "-" else "")
-            + f"🌍 Регион: {reg}\n\n💰 <b>Цена: {p} ₽</b>\n\n"
+            + (f"🌍 Регион: {reg}\n\n" if reg != "-" else "\n")
+            + f"💰 <b>Цена: {p} ₽</b>\n\n"
             + MSG["product_card_footer"])
 
     kb = InlineKeyboardBuilder()
