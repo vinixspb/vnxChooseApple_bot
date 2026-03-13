@@ -2,6 +2,7 @@
 import html
 import logging
 import os
+import re
 import aiohttp
 from aiogram import Router, F, types
 from aiogram.filters import Command, StateFilter
@@ -13,41 +14,86 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from states.product_states import ProductSelection
 import services.data_store as store
 from services.assistant_service import get_assistant_reply, trim_history
-from services.messages import MSG, BTN
+from services.messages import MSG
 from keyboards import get_main_menu
+# Импортируем finalize из каталога, чтобы кнопка ИИ вела сразу в карточку товара
+from handlers.catalog import finalize 
 
 router = Router()
 logger = logging.getLogger(__name__)
 
+def extract_recommendations(reply: str, kb: InlineKeyboardBuilder):
+    """Ищет тег [RECOMMEND: id1, id2], удаляет его из текста и добавляет инлайн-кнопки."""
+    match = re.search(r'\[RECOMMEND:\s*(.+?)\]', reply)
+    if match:
+        ids_str = match.group(1)
+        item_ids = [i.strip() for i in ids_str.split(',')]
+        
+        # Вырезаем тег из текста ответа (чтобы клиент его не видел)
+        reply = reply[:match.start()] + reply[match.end():]
+        reply = reply.strip()
+        
+        for item_id in item_ids:
+            # Ищем товар по ID
+            item = next((x for x in store.CATALOG if str(x.get("id")) == item_id), None)
+            if item:
+                # Генерируем красивое название для кнопки
+                btn_text = f"👉 Смотреть: {item.get('title')} {item.get('memory', '')}".replace(" -", "").strip()
+                # callback_data ограничена 64 символами, обрезаем
+                cb_data = f"rec_{item_id}"[:60]
+                kb.row(InlineKeyboardButton(text=btn_text, callback_data=cb_data))
+                
+    return reply, kb
+
 async def _launch_assistant(target, state: FSMContext):
-    await state.clear()
+    data = await state.get_data()
+    history = data.get("chat_history", [])
+    
     await state.set_state(ProductSelection.consulting)
-    
-    # ЛЕЧИМ АМНЕЗИЮ: сразу записываем приветствие в историю ИИ
-    history = [
-        {"role": "assistant", "content": MSG["assistant_greeting"]}
-    ]
-    await state.update_data(chat_history=history)
-    
-    kb = InlineKeyboardBuilder().row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
+    kb = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="ai_pause"))
     msg = target.message if hasattr(target, 'message') else target
-    await msg.answer(MSG["assistant_greeting"], reply_markup=kb.as_markup())
+
+    if history:
+        # Если история уже есть — приветствуем контекстно и НЕ перезаписываем память
+        await msg.answer("🧠 <b>AI-Genius</b>\n\nМы снова в чате! На чём мы остановились?", reply_markup=kb.as_markup())
+    else:
+        # Лечим амнезию: записываем первое приветствие в историю
+        history = [{"role": "assistant", "content": MSG["assistant_greeting"]}]
+        await state.update_data(chat_history=history)
+        await msg.answer(MSG["assistant_greeting"], reply_markup=kb.as_markup())
 
 @router.message(Command("ai"))
 async def cmd_ai(message: types.Message, state: FSMContext):
     await _launch_assistant(message, state)
 
-# ФИКС: Здесь теперь "start_consulting"
 @router.callback_query(F.data == "start_consulting")
 async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
     await _launch_assistant(callback, state)
     await callback.answer()
 
-@router.callback_query(F.data == "exit_assistant")
-async def exit_assistant(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer(MSG["assistant_exit"], reply_markup=get_main_menu())
+@router.callback_query(F.data == "ai_pause")
+async def ai_pause(callback: types.CallbackQuery, state: FSMContext):
+    """Скрытая магия: перекидываем в меню, но сохраняем историю диалога в памяти!"""
+    await state.set_state(None) # Снимаем стейт, но не делаем state.clear()
+    await callback.message.answer(
+        "🍏 <b>Главное меню</b>\n\n"
+        "<i>Кстати, наш диалог сохранен! Вы можете свободно изучать товары, "
+        "а когда захотите продолжить общение — просто снова нажмите кнопку ✨ Идеальный подбор (AI).</i> 👇",
+        reply_markup=get_main_menu()
+    )
     await callback.answer()
+
+# ─── НОВЫЙ ХЕНДЛЕР: Обработка клика по кнопке товара от ИИ ───
+@router.callback_query(F.data.startswith("rec_"))
+async def handle_recommendation_click(callback: types.CallbackQuery, state: FSMContext):
+    item_id = callback.data.replace("rec_", "")
+    item = next((x for x in store.CATALOG if str(x.get("id")) == item_id), None)
+    
+    if item:
+        await callback.answer("Загружаю карточку товара...")
+        await finalize(callback, item, state)
+    else:
+        await callback.answer("❌ Товар не найден или уже продан", show_alert=True)
 
 @router.message(StateFilter(ProductSelection.consulting), F.text)
 async def assistant_message(message: types.Message, state: FSMContext):
@@ -64,8 +110,9 @@ async def assistant_message(message: types.Message, state: FSMContext):
     await state.update_data(chat_history=trim_history(history))
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main"))
-    kb.row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
+    reply, kb = extract_recommendations(reply, kb)
+    kb.row(InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="ai_pause"))
+    
     await message.answer(reply, reply_markup=kb.as_markup())
 
 @router.message(F.voice)
@@ -110,11 +157,10 @@ async def handle_voice(message: types.Message, state: FSMContext):
     await state.update_data(chat_history=trim_history(history))
 
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main"))
-    kb.row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
+    reply, kb = extract_recommendations(reply, kb)
+    kb.row(InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="ai_pause"))
     await message.answer(reply, reply_markup=kb.as_markup())
 
-# Ловим свободный текст вне режимов
 @router.message(~StateFilter(ProductSelection.selecting), ~StateFilter(ProductSelection.waiting_for_magic_photo), ~StateFilter(ProductSelection.consulting), F.text)
 async def handle_free_text(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
@@ -125,5 +171,8 @@ async def handle_free_text(message: types.Message, state: FSMContext):
     reply = await get_assistant_reply(user_message=text, history=[], catalog=store.CATALOG)
     
     await state.update_data(chat_history=[{"role": "user", "content": text}, {"role": "assistant", "content": reply}])
-    kb = InlineKeyboardBuilder().row(InlineKeyboardButton(text=BTN["catalog"], callback_data="back_to_main")).row(InlineKeyboardButton(text=BTN["exit_assistant"], callback_data="exit_assistant"))
+    
+    kb = InlineKeyboardBuilder()
+    reply, kb = extract_recommendations(reply, kb)
+    kb.row(InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="ai_pause"))
     await message.answer(reply, reply_markup=kb.as_markup())
