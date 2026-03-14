@@ -5,6 +5,7 @@ from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
 
 from states.product_states import ProductSelection
 from services.sheets_manager import get_data_from_sheet, get_settings
@@ -12,8 +13,6 @@ import services.data_store as store
 from services.messages import MSG, BTN
 from keyboards import get_main_menu, get_dynamic_keyboard
 from utils.media import get_stub, send_photo_safe
-from aiogram.types import InlineKeyboardButton
-
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -146,14 +145,18 @@ async def run_step(callback, state, filters, idx):
     stub_url = get_stub(filters["cat"], filters.get("model_group", ""))
     kb = get_dynamic_keyboard(kb_list, "stg_")
 
-    if stub_url:
-        if callback.message.photo: await send_photo_safe(callback.message, stub_url, text, kb, is_edit=True)
+    try:
+        if stub_url:
+            if callback.message.photo: await send_photo_safe(callback.message, stub_url, text, kb, is_edit=True)
+            else:
+                await callback.message.delete()
+                await send_photo_safe(callback.message, stub_url, text, kb, is_edit=False)
         else:
-            await callback.message.delete()
-            await send_photo_safe(callback.message, stub_url, text, kb, is_edit=False)
-    else:
-        if callback.message.photo: await callback.message.edit_caption(caption=text, reply_markup=kb)
-        else: await callback.message.edit_text(text, reply_markup=kb)
+            if callback.message.photo: await callback.message.edit_caption(caption=text, reply_markup=kb)
+            else: await callback.message.edit_text(text, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Telegram edit error: {e}")
 
 @router.callback_query(ProductSelection.selecting, F.data.startswith("stg_"))
 async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
