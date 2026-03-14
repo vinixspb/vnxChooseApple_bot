@@ -49,7 +49,7 @@ async def start_category(callback: types.CallbackQuery, state: FSMContext):
     await run_step(callback, state, {"cat": cat}, 0)
 
 async def run_step(callback, state, filters, idx):
-    data = [i for i in store.CATALOG if filters["cat"].lower() in str(i.get("model_group", "")).lower()]
+    data = [i for i in store.CATALOG if filters["cat"].lower() in str(i.get("model_group", i.get("Модель", ""))).lower()]
     
     for i in range(idx):
         stage = store.STAGES[i]
@@ -70,13 +70,10 @@ async def run_step(callback, state, filters, idx):
     step_name = store.STAGES[idx]
     cat = filters.get("cat", "").lower()
     
-    # ─── ИДЕАЛЬНАЯ ЛОГИКА ПРОПУСКОВ ОТ АНДРЕЯ ───
     SKIP_BY_CAT = {
         "iphone":  {"size", "memory_ram"},
-        "ipad":    {"memory_ram"},
-        "mac":     {"sim"},
-        "watch":   {"memory_ram", "sim", "memory"},
-        "airpods": {"size", "memory_ram", "sim"}
+        "airpods": {"size", "sim", "memory_ram"},
+        "watch":   {"size", "sim", "memory_ram", "memory"},
     }
     
     if step_name in SKIP_BY_CAT.get(cat, set()):
@@ -171,46 +168,110 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
     filters[store.STAGES[s["idx"]]] = val
     await run_step(callback, state, filters, s["idx"] + 1)
 
+# ─── НОВЫЙ БЛОК: Бесшовный выбор цвета ───
+def get_siblings(item):
+    """Ищет варианты той же модели с такой же памятью и сим, но в других цветах."""
+    siblings = []
+    for d in store.CATALOG:
+        if d.get("availability", "").lower() != "in stock": continue
+        if (d.get("model_group") == item.get("model_group") and
+            d.get("memory") == item.get("memory") and
+            d.get("memory_ram") == item.get("memory_ram") and
+            d.get("sim") == item.get("sim") and
+            d.get("size") == item.get("size")):
+            siblings.append(d)
+    return siblings
+
+@router.callback_query(F.data.startswith("csw_"))
+async def show_color_options(callback: types.CallbackQuery, state: FSMContext):
+    """Разворачивает кнопку 'Другой цвет' в список доступных цветов."""
+    item_id_prefix = callback.data.replace("csw_", "")
+    item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
+    
+    if not item: return await callback.answer("❌ Товар не найден", show_alert=True)
+    
+    siblings = get_siblings(item)
+    unique_colors = {}
+    for sib in siblings:
+        c = sib.get("color", "-")
+        if c != "-" and c not in unique_colors:
+            unique_colors[c] = sib
+            
+    kb = InlineKeyboardBuilder()
+    for c, sib in unique_colors.items():
+        prefix = "✅ " if c == item.get("color") else ""
+        cb_data = f"csel_{sib['id']}"
+        while len(cb_data.encode('utf-8')) > 60: cb_data = cb_data[:-1]
+        kb.row(InlineKeyboardButton(text=f"{prefix}{c}", callback_data=cb_data))
+        
+    back_data = f"csel_{item['id']}"
+    while len(back_data.encode('utf-8')) > 60: back_data = back_data[:-1]
+    kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back_data))
+    
+    try: await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
+    except TelegramBadRequest: pass
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("csel_"))
+async def select_new_color(callback: types.CallbackQuery, state: FSMContext):
+    """Применяет выбранный цвет и возвращает обычную карточку."""
+    item_id_prefix = callback.data.replace("csel_", "")
+    item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
+    
+    if not item: return await callback.answer("❌ Товар не найден", show_alert=True)
+    await callback.answer("Загружаю...")
+    await finalize(callback, item, state)
+
 async def finalize(callback, item, state):
     def norm(k):
         v = str(item.get(k, '')).strip()
         return html.escape(v) if v else "-"
 
     t = html.escape(str(item.get('title', '')))
-    
-    # Красивое форматирование цены (100000 -> 100 000)
-    raw_p = str(item.get('price', '0'))
-    try:
-        p = f"{int(raw_p):,}".replace(",", " ")
-    except ValueError:
-        p = html.escape(raw_p)
-
+    p = html.escape(str(item.get('price', '')))
     size, mem, ram, c, sim, reg = [norm(k) for k in ['size', 'memory', 'memory_ram', 'color', 'sim', 'region']]
 
     text = (f"✅ <b>{t}</b>\n\n"
             + (f"📐 Размер: {size}\n" if size != "-" else "")
             + (f"💾 Память: {mem}\n" if mem != "-" else "")
             + (f"🧠 RAM: {ram}\n" if ram != "-" else "")
-            + (f"🎨 Цвет: {c}\n" if c != "-" else "")
+            + f"🎨 Цвет: {c}\n"
             + (f"📡 SIM: {sim}\n" if sim != "-" else "")
-            + (f"🌍 Регион: {reg}\n\n" if reg != "-" else "\n")
-            + f"💰 <b>Цена: {p} ₽</b>\n\n"
+            + f"🌍 Регион: {reg}\n\n💰 <b>Цена: {p} ₽</b>\n\n"
             + MSG["product_card_footer"])
 
+    # Проверяем, есть ли другие цвета в наличии для этой комплектации
+    siblings = get_siblings(item)
+    colors_available = list(set([s.get("color", "-") for s in siblings if s.get("color", "-") != "-"]))
+
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=BTN["confirm_order"], callback_data="confirm_order"))
+    
+    # 1. 🎨 Другой цвет (появляется только если есть выбор)
+    if len(colors_available) > 1:
+        cb_data = f"csw_{item['id']}"
+        while len(cb_data.encode('utf-8')) > 60: cb_data = cb_data[:-1]
+        kb.row(InlineKeyboardButton(text=BTN["other_color"], callback_data=cb_data))
+        
+    # 2. 📸 AI магия
     kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
+    # 3. ✅ Подтвердить заказ
+    kb.row(InlineKeyboardButton(text=BTN["confirm_order"], callback_data="confirm_order"))
+    # 4. ⬅️ Главное меню
     kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
 
     img_url = item.get('image', '')
     photo_url = img_url if str(img_url).startswith("http") else get_stub(item.get('model_group', ''))
 
-    if callback.message.photo:
-        if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=True)
-        else: await callback.message.edit_caption(caption=text, reply_markup=kb.as_markup())
-    else:
-        if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=False)
-        else: await callback.message.answer(text, reply_markup=kb.as_markup())
+    try:
+        if callback.message.photo:
+            if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=True)
+            else: await callback.message.edit_caption(caption=text, reply_markup=kb.as_markup())
+        else:
+            if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=False)
+            else: await callback.message.answer(text, reply_markup=kb.as_markup())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            logger.error(f"Telegram edit error in finalize: {e}")
 
     await state.update_data(title=item.get('title', ''), product_image_url=photo_url or "")
 
