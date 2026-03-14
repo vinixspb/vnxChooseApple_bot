@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InlineKeyboardButton
 
 from states.product_states import ProductSelection
 from services.sheets_manager import get_data_from_sheet, get_settings
