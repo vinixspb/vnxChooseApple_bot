@@ -1,12 +1,11 @@
+# handlers/catalog.py
 import html
 import logging
 import os
 from aiogram import Router, F, types
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import InlineKeyboardButton
 
 from states.product_states import ProductSelection
 from services.sheets_manager import get_data_from_sheet, get_settings
@@ -29,9 +28,16 @@ async def cmd_reset(message: types.Message, state: FSMContext):
     await load_all()
     await message.answer(MSG["reload_done"], reply_markup=get_main_menu())
 
-@router.message(Command("start"))
-async def cmd_start(message: types.Message, state: FSMContext):
+@router.message(CommandStart())
+async def cmd_start(message: types.Message, command: CommandObject, state: FSMContext):
     await state.clear()
+    
+    # Обработка перехода по ссылке из Группы (Deep Link: ?start=ai)
+    if command.args == "ai":
+        from handlers.assistant import _launch_assistant
+        await _launch_assistant(message, state)
+        return
+        
     await message.answer(MSG["welcome"], reply_markup=get_main_menu())
 
 @router.callback_query(F.data == "back_to_main")
@@ -50,12 +56,15 @@ async def start_category(callback: types.CallbackQuery, state: FSMContext):
     await run_step(callback, state, {"cat": cat}, 0)
 
 async def run_step(callback, state, filters, idx):
+    # 1. Фильтр по категории (защита на случай, если ключи русские или английские)
     data = [i for i in store.CATALOG if filters["cat"].lower() in str(i.get("model_group", i.get("Модель", ""))).lower()]
     
+    # 2. Применяем все предыдущие фильтры
     for i in range(idx):
         stage = store.STAGES[i]
         if stage in filters and filters[stage] != "*SKIPPED*":
             req_val = filters[stage]
+            # ФИКС: пустая строка и "-" считаются эквивалентными
             data = [
                 d for d in data 
                 if str(d.get(stage, "")).strip() == req_val 
@@ -71,16 +80,19 @@ async def run_step(callback, state, filters, idx):
     step_name = store.STAGES[idx]
     cat = filters.get("cat", "").lower()
     
+    # Списки шагов для пропуска
     SKIP_BY_CAT = {
         "iphone":  {"size", "memory_ram"},
         "airpods": {"size", "sim", "memory_ram"},
         "watch":   {"size", "sim", "memory_ram", "memory"},
     }
     
+    # ФИКС: Вместо "-" ставим метку "*SKIPPED*", чтобы фильтр выше игнорировал этот шаг
     if step_name in SKIP_BY_CAT.get(cat, set()):
         filters[step_name] = "*SKIPPED*"
         return await run_step(callback, state, filters, idx + 1)
 
+    # Нормализуем значения: пустые превращаем в "-"
     vals_raw = [str(d.get(step_name, "")).strip() for d in data]
     vals_raw = ["-" if not v else v for v in vals_raw]
     vals = sorted(list(set(vals_raw)))
@@ -143,18 +155,14 @@ async def run_step(callback, state, filters, idx):
     stub_url = get_stub(filters["cat"], filters.get("model_group", ""))
     kb = get_dynamic_keyboard(kb_list, "stg_")
 
-    try:
-        if stub_url:
-            if callback.message.photo: await send_photo_safe(callback.message, stub_url, text, kb, is_edit=True)
-            else:
-                await callback.message.delete()
-                await send_photo_safe(callback.message, stub_url, text, kb, is_edit=False)
+    if stub_url:
+        if callback.message.photo: await send_photo_safe(callback.message, stub_url, text, kb, is_edit=True)
         else:
-            if callback.message.photo: await callback.message.edit_caption(caption=text, reply_markup=kb)
-            else: await callback.message.edit_text(text, reply_markup=kb)
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            logger.error(f"Telegram edit error: {e}")
+            await callback.message.delete()
+            await send_photo_safe(callback.message, stub_url, text, kb, is_edit=False)
+    else:
+        if callback.message.photo: await callback.message.edit_caption(caption=text, reply_markup=kb)
+        else: await callback.message.edit_text(text, reply_markup=kb)
 
 @router.callback_query(ProductSelection.selecting, F.data.startswith("stg_"))
 async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
@@ -168,60 +176,6 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
     filters = s["filters"]
     filters[store.STAGES[s["idx"]]] = val
     await run_step(callback, state, filters, s["idx"] + 1)
-
-# ─── НОВЫЙ БЛОК: Бесшовный выбор цвета ───
-def get_siblings(item):
-    """Ищет варианты той же модели с такой же памятью и сим, но в других цветах."""
-    siblings = []
-    for d in store.CATALOG:
-        if d.get("availability", "").lower() != "in stock": continue
-        if (d.get("model_group") == item.get("model_group") and
-            d.get("memory") == item.get("memory") and
-            d.get("memory_ram") == item.get("memory_ram") and
-            d.get("sim") == item.get("sim") and
-            d.get("size") == item.get("size")):
-            siblings.append(d)
-    return siblings
-
-@router.callback_query(F.data.startswith("csw_"))
-async def show_color_options(callback: types.CallbackQuery, state: FSMContext):
-    """Разворачивает кнопку 'Другой цвет' в список доступных цветов."""
-    item_id_prefix = callback.data.replace("csw_", "")
-    item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
-    
-    if not item: return await callback.answer("❌ Товар не найден", show_alert=True)
-    
-    siblings = get_siblings(item)
-    unique_colors = {}
-    for sib in siblings:
-        c = sib.get("color", "-")
-        if c != "-" and c not in unique_colors:
-            unique_colors[c] = sib
-            
-    kb = InlineKeyboardBuilder()
-    for c, sib in unique_colors.items():
-        prefix = "✅ " if c == item.get("color") else ""
-        cb_data = f"csel_{sib['id']}"
-        while len(cb_data.encode('utf-8')) > 60: cb_data = cb_data[:-1]
-        kb.row(InlineKeyboardButton(text=f"{prefix}{c}", callback_data=cb_data))
-        
-    back_data = f"csel_{item['id']}"
-    while len(back_data.encode('utf-8')) > 60: back_data = back_data[:-1]
-    kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back_data))
-    
-    try: await callback.message.edit_reply_markup(reply_markup=kb.as_markup())
-    except TelegramBadRequest: pass
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("csel_"))
-async def select_new_color(callback: types.CallbackQuery, state: FSMContext):
-    """Применяет выбранный цвет и возвращает обычную карточку."""
-    item_id_prefix = callback.data.replace("csel_", "")
-    item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
-    
-    if not item: return await callback.answer("❌ Товар не найден", show_alert=True)
-    await callback.answer("Загружаю...")
-    await finalize(callback, item, state)
 
 async def finalize(callback, item, state):
     def norm(k):
@@ -241,38 +195,20 @@ async def finalize(callback, item, state):
             + f"🌍 Регион: {reg}\n\n💰 <b>Цена: {p} ₽</b>\n\n"
             + MSG["product_card_footer"])
 
-    # Проверяем, есть ли другие цвета в наличии для этой комплектации
-    siblings = get_siblings(item)
-    colors_available = list(set([s.get("color", "-") for s in siblings if s.get("color", "-") != "-"]))
-
     kb = InlineKeyboardBuilder()
-    
-    # 1. 🎨 Другой цвет (появляется только если есть выбор)
-    if len(colors_available) > 1:
-        cb_data = f"csw_{item['id']}"
-        while len(cb_data.encode('utf-8')) > 60: cb_data = cb_data[:-1]
-        kb.row(InlineKeyboardButton(text=BTN["other_color"], callback_data=cb_data))
-        
-    # 2. 📸 AI магия
-    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
-    # 3. ✅ Подтвердить заказ
     kb.row(InlineKeyboardButton(text=BTN["confirm_order"], callback_data="confirm_order"))
-    # 4. ⬅️ Главное меню
+    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
     kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
 
     img_url = item.get('image', '')
     photo_url = img_url if str(img_url).startswith("http") else get_stub(item.get('model_group', ''))
 
-    try:
-        if callback.message.photo:
-            if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=True)
-            else: await callback.message.edit_caption(caption=text, reply_markup=kb.as_markup())
-        else:
-            if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=False)
-            else: await callback.message.answer(text, reply_markup=kb.as_markup())
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            logger.error(f"Telegram edit error in finalize: {e}")
+    if callback.message.photo:
+        if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=True)
+        else: await callback.message.edit_caption(caption=text, reply_markup=kb.as_markup())
+    else:
+        if photo_url: await send_photo_safe(callback.message, photo_url, text, kb.as_markup(), is_edit=False)
+        else: await callback.message.answer(text, reply_markup=kb.as_markup())
 
     await state.update_data(title=item.get('title', ''), product_image_url=photo_url or "")
 
