@@ -14,7 +14,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 
 # 3. И ТОЛЬКО ТЕПЕРЬ импортируем наши роутеры (которые при импорте полезут искать ключи в os.getenv)
-from handlers import catalog, assistant, magic
+# ФИКС: Добавлены group и channel
+from handlers import catalog, assistant, magic, group, channel
 from handlers.catalog import load_all
 
 
@@ -55,6 +56,10 @@ async def main():
     dp.include_router(catalog.router)
     dp.include_router(assistant.router)
     dp.include_router(magic.router)
+    
+    # ФИКС: Подключаем новые модули для работы в группе и канале
+    dp.include_router(group.router)
+    dp.include_router(channel.router)
 
     # Выполняем стартовую настройку
     await set_bot_commands(bot)
