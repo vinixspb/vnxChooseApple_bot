@@ -17,6 +17,7 @@ FETCH_HEADERS = {
 }
 
 def get_stub(cat, model=""):
+    """Умный поиск картинок-заглушек в настройках"""
     keys = {
         "iPhone":  "iPhone_STUB",
         "iPad":    "iPad_STUB",
@@ -24,7 +25,17 @@ def get_stub(cat, model=""):
         "AirPods": "AirPods_STUB",
     }
     key = keys.get(cat, "MacBook_STUB" if "iMac" not in model else "iMac_STUB")
-    return store.SETTINGS.get(key)
+    
+    # 1. Ищем строгое совпадение
+    res = store.SETTINGS.get(key)
+    if res: return res
+    
+    # 2. Если не нашли, ищем частичное совпадение (защита от опечаток в таблице)
+    for k, v in store.SETTINGS.items():
+        if cat.lower() in str(k).lower():
+            return v
+            
+    return ""
 
 async def fetch_image_bytes(url: str) -> bytes | None:
     if not url or not url.startswith("http"):
