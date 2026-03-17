@@ -14,62 +14,49 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 
 # 3. И ТОЛЬКО ТЕПЕРЬ импортируем наши роутеры (которые при импорте полезут искать ключи в os.getenv)
-# ФИКС: Добавлены group и channel
 from handlers import catalog, assistant, magic, group, channel
 from handlers.catalog import load_all
 
 
 async def set_bot_commands(bot: Bot):
-    """
-    Устанавливает команды для синей кнопки Menu (слева от поля ввода текста).
-    Это перезаписывает то, что было установлено через BotFather.
-    """
     commands = [
         BotCommand(command="start", description="🏠 Главное меню"),
         BotCommand(command="reset", description="🔄 Перезагрузить каталог"),
-        BotCommand(command="ai",    description="🤖 Помочь с выбором (AI)")
+        BotCommand(command="ai",    description="🤖 Помочь с выбором (AI)"),
     ]
-    # Применяем команды для всех пользователей по умолчанию
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-    
-    # Гарантируем, что кнопка Menu отображается как кнопка команд
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
+
 async def main():
-    # Настраиваем базовое логирование
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     logger.info("vnxChooseApple Bot Started (Modular Architecture)")
 
-    # Инициализация бота с глобальным ParseMode.HTML для защиты от спецсимволов
     bot = Bot(
-        token=os.getenv('BOT_TOKEN'),
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        token=os.getenv("BOT_TOKEN"),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    
-    # Инициализация диспетчера
     dp = Dispatcher()
 
-    # Подключаем модули (роутеры) в строгом порядке
-    # ВАЖНО: Порядок имеет значение. catalog ловит специфичные коллбеки,
-    # assistant ловит свободный текст, magic ловит фото в определенном состоянии.
-    dp.include_router(catalog.router)
-    dp.include_router(assistant.router)
-    dp.include_router(magic.router)
-    
-    # ФИКС: Подключаем новые модули для работы в группе и канале
+    # ── Порядок роутеров КРИТИЧЕН ────────────────────────────────────────────
+    # 1. group    — фильтры для группы (Chat ID проверяется первым)
+    # 2. channel  — фильтры для канала
+    # 3. catalog  — воронка выбора товара (inline-кнопки, FSM selecting)
+    # 4. magic    — AI магия (FSM waiting_for_magic_photo)
+    # 5. assistant — catch-all текст/голос (FSM consulting + свободный ввод)
+    #                ↑ ВСЕГДА ПОСЛЕДНИМ — иначе перехватит группу и канал
     dp.include_router(group.router)
     dp.include_router(channel.router)
+    dp.include_router(catalog.router)
+    dp.include_router(magic.router)
+    dp.include_router(assistant.router)   # catch-all — только последним!
+    # ────────────────────────────────────────────────────────────────────────
 
-    # Выполняем стартовую настройку
     await set_bot_commands(bot)
-    
-    # Первичная загрузка каталога в глобальное хранилище data_store
     await load_all()
-    
-    # Запускаем пулинг
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
-    # Запускаем асинхронный цикл событий
     asyncio.run(main())
