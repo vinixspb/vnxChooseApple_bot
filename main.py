@@ -4,16 +4,17 @@ import logging
 import os
 from dotenv import load_dotenv
 
-# 1. СНАЧАЛА импортируем и вызываем load_dotenv
+# 1. СНАЧАЛА загружаем .env — до любых импортов которые читают os.getenv()
+#    (KieService, OpenRouter, Google Sheets и др. инициализируются при импорте модуля)
 load_dotenv()
 
-# 2. ЗАТЕМ импортируем aiogram
+# 2. Затем aiogram
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 
-# 3. И ТОЛЬКО ТЕПЕРЬ импортируем наши роутеры (которые при импорте полезут искать ключи в os.getenv)
+# 3. И только теперь наши роутеры
 from handlers import catalog, assistant, magic, group, channel
 from handlers.catalog import load_all
 
@@ -40,10 +41,10 @@ async def main():
     dp = Dispatcher()
 
     # ── Порядок роутеров КРИТИЧЕН ────────────────────────────────────────────
-    # 1. group    — фильтры для группы (Chat ID проверяется первым)
-    # 2. channel  — фильтры для канала
-    # 3. catalog  — воронка выбора товара (inline-кнопки, FSM selecting)
-    # 4. magic    — AI магия (FSM waiting_for_magic_photo)
+    # 1. group     — фильтры для группы (Chat ID проверяется первым)
+    # 2. channel   — фильтры для канала
+    # 3. catalog   — воронка выбора товара (inline-кнопки, FSM selecting)
+    # 4. magic     — AI магия (FSM waiting_for_magic_photo)
     # 5. assistant — catch-all текст/голос (FSM consulting + свободный ввод)
     #                ↑ ВСЕГДА ПОСЛЕДНИМ — иначе перехватит группу и канал
     dp.include_router(group.router)
