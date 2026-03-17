@@ -40,7 +40,6 @@ def extract_recommendations(reply: str, kb: InlineKeyboardBuilder):
                 # Генерируем красивое название для кнопки
                 btn_text = f"👉 Смотреть: {item.get('title')} {item.get('memory', '')}".replace(" -", "").strip()
                 
-                # ФИКС: Telegram отклоняет callback_data длиннее 64 БАЙТ (кириллица весит больше).
                 # Безопасно обрезаем строку, пока она не станет легче 60 байт.
                 cb_data = f"rec_{item_id}"
                 while len(cb_data.encode('utf-8')) > 60:
@@ -67,7 +66,8 @@ async def _launch_assistant(target, state: FSMContext):
         await state.update_data(chat_history=history)
         await msg.answer(MSG["assistant_greeting"], reply_markup=kb.as_markup())
 
-@router.message(Command("ai"))
+# ФИКС: Ограничиваем команду /ai только личными сообщениями
+@router.message(F.chat.type == "private", Command("ai"))
 async def cmd_ai(message: types.Message, state: FSMContext):
     await _launch_assistant(message, state)
 
@@ -79,7 +79,7 @@ async def start_assistant(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "ai_pause")
 async def ai_pause(callback: types.CallbackQuery, state: FSMContext):
     """Скрытая магия: перекидываем в меню, но сохраняем историю диалога в памяти!"""
-    await state.set_state(None) # Снимаем стейт, но не делаем state.clear()
+    await state.set_state(None) 
     await callback.message.answer(
         "🍏 <b>Главное меню</b>\n\n"
         "<i>Кстати, наш диалог сохранен! Вы можете свободно изучать товары, "
@@ -88,12 +88,9 @@ async def ai_pause(callback: types.CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# ─── НОВЫЙ ХЕНДЛЕР: Обработка клика по кнопке товара от ИИ ───
 @router.callback_query(F.data.startswith("rec_"))
 async def handle_recommendation_click(callback: types.CallbackQuery, state: FSMContext):
     item_id_prefix = callback.data.replace("rec_", "")
-    
-    # ФИКС: Ищем товар по startswith, так как очень длинные ID мы обрезали в парсере кнопок
     item = next((x for x in store.CATALOG if str(x.get("id")).startswith(item_id_prefix)), None)
     
     if item:
@@ -102,7 +99,8 @@ async def handle_recommendation_click(callback: types.CallbackQuery, state: FSMC
     else:
         await callback.answer("❌ Товар не найден или уже продан", show_alert=True)
 
-@router.message(StateFilter(ProductSelection.consulting), F.text)
+# ФИКС: Ограничиваем режим консультации только личными сообщениями
+@router.message(F.chat.type == "private", StateFilter(ProductSelection.consulting), F.text)
 async def assistant_message(message: types.Message, state: FSMContext):
     user_text = (message.text or "").strip()
     if not user_text: return
@@ -122,7 +120,8 @@ async def assistant_message(message: types.Message, state: FSMContext):
     
     await message.answer(reply, reply_markup=kb.as_markup())
 
-@router.message(F.voice)
+# ФИКС: Ограничиваем голосовые сообщения только личными сообщениями
+@router.message(F.chat.type == "private", F.voice)
 async def handle_voice(message: types.Message, state: FSMContext):
     openai_key = os.getenv("OPENAI_API_KEY", "")
     if not openai_key:
@@ -168,7 +167,8 @@ async def handle_voice(message: types.Message, state: FSMContext):
     kb.row(InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="ai_pause"))
     await message.answer(reply, reply_markup=kb.as_markup())
 
-@router.message(~StateFilter(ProductSelection.selecting), ~StateFilter(ProductSelection.waiting_for_magic_photo), ~StateFilter(ProductSelection.consulting), F.text)
+# ФИКС: Ограничиваем свободный ввод текста только личными сообщениями
+@router.message(F.chat.type == "private", ~StateFilter(ProductSelection.selecting), ~StateFilter(ProductSelection.waiting_for_magic_photo), ~StateFilter(ProductSelection.consulting), F.text)
 async def handle_free_text(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
     if text.startswith("🤖") or text.startswith("🏠") or text.startswith("🔄") or text.startswith("✨"): return
