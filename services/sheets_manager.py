@@ -153,11 +153,13 @@ def get_settings():
     try:
         spreadsheet = gc.open_by_key(os.getenv("SPREADSHEET_ID"))
         rows = spreadsheet.worksheet("Settings").get_all_records()
-        result = {
-            str(r.get("Категория")): str(r.get("Ссылка"))
-            for r in rows
-            if r.get("Категория")
-        }
+        result = {}
+        for r in rows:
+            # Поддерживаем и английские (Key/Value), и русские заголовки
+            k = r.get("Key") or r.get("Категория")
+            v = r.get("Value") or r.get("Ссылка")
+            if k:
+                result[str(k)] = str(v)
         logger.info(f"Settings: загружено {len(result)} ключей")
         return result
     except Exception as e:
