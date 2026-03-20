@@ -1,4 +1,5 @@
 import logging
+import re
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 async def handle_channel_post(message: types.Message):
     """
     Автоматически сканирует посты в канале и добавляет релевантные кнопки.
+    Использует регулярные выражения (re) для точного поиска слов и корней.
     """
     text = (message.text or message.caption or "").lower()
     if not text:
@@ -18,18 +20,18 @@ async def handle_channel_post(message: types.Message):
     kb = InlineKeyboardBuilder()
     added = False
 
-    # Триггеры для AI (vnxORACLE)
-    if any(kw in text for kw in ["ai", "нейросеть", "ии", "chatgpt", "oracle", "генерация"]):
-        kb.row(InlineKeyboardButton(text="🔮 Нейросети и Аватары (vnxORACLE)", url="https://t.me/vnxORACLE_bot"))
+    # 1. Триггеры для AI (vnxORACLE) 
+    if re.search(r'\b(ai|ии|chatgpt|oracle)\b|нейросет|генераци', text):
+        kb.row(InlineKeyboardButton(text="🔮 ChatGPT и AI без VPN (vnxORACLE)", url="https://t.me/vnxORACLE_bot"))
         added = True
         
-    # Триггеры для VPN (vnxMATRIX)
-    if any(kw in text for kw in ["vpn", "безопасность", "блокировка", "трафик", "matrix"]):
-        kb.row(InlineKeyboardButton(text="🛡 Безопасный VPN (vnxMATRIX)", url="https://t.me/vnxMATRIX_bot"))
+    # 2. Триггеры для VPN (vnxMATRIX) - ИСПРАВЛЕННАЯ ССЫЛКА
+    if re.search(r'\b(vpn|ркн)\b|безопасност|блокир|трафик|matrix|роскомнадзор|замедл|огранич', text):
+        kb.row(InlineKeyboardButton(text="🛡 Безопасный VPN (vnxMATRIX)", url="https://t.me/vnxMATRIX_Gateway_bot"))
         added = True
         
-    # Триггеры для Каталога (vnxSHOP)
-    if any(kw in text for kw in ["apple", "iphone", "mac", "скидка", "прайс", "ipad", "watch", "airpods"]):
+    # 3. Триггеры для Каталога (vnxSHOP)
+    if re.search(r'\b(mac)\b|apple|iphone|скидк|прайс|ipad|watch|airpods', text):
         kb.row(InlineKeyboardButton(text="🍏 Найти в каталоге (vnxSHOP)", url="https://t.me/vnxSHOP_AppleFinder_bot"))
         added = True
 
