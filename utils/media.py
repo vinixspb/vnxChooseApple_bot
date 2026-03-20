@@ -26,11 +26,11 @@ def get_stub(cat, model=""):
     }
     key = keys.get(cat, "MacBook_STUB" if "iMac" not in model else "iMac_STUB")
     
-    # 1. Ищем строгое совпадение
+    # 1. Точное совпадение
     res = store.SETTINGS.get(key)
     if res: return res
     
-    # 2. Если не нашли, ищем частичное совпадение (защита от опечаток в таблице)
+    # 2. Умное совпадение (если в таблице написано просто "iPhone", а не "iPhone_STUB")
     for k, v in store.SETTINGS.items():
         if cat.lower() in str(k).lower():
             return v
@@ -46,7 +46,6 @@ async def fetch_image_bytes(url: str) -> bytes | None:
                 if resp.status == 200:
                     data = await resp.read()
                     return data
-                logger.warning(f"fetch_image_bytes: HTTP {resp.status} for {url[:60]}")
                 return None
     except Exception as e:
         logger.warning(f"fetch_image_bytes error: {e}")
@@ -66,7 +65,6 @@ async def send_photo_safe(target, url: str, caption: str, reply_markup, is_edit:
         else:
             await target.answer_photo(url, caption=caption, reply_markup=reply_markup)
     except Exception as e:
-        logger.warning(f"send_photo_safe: прямой URL не сработал ({e}), качаю байты...")
         photo_bytes = await fetch_image_bytes(url)
         if photo_bytes:
             await _as_buffered(photo_bytes)
