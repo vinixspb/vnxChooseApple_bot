@@ -13,6 +13,21 @@ MAX_TOKENS      = 1024
 API_URL         = "https://openrouter.ai/api/v1/chat/completions"
 MAX_HISTORY     = 20   # сообщений (10 пар вопрос/ответ) — чтобы не раздувать контекст
 
+# ── Уведомления Админу через @vnxSYSNOTIFY_bot ───────────────────────────────
+async def notify_admin(text: str):
+    """Экстренная отправка сообщения админу (MANAGER_ID) через бота уведомлений"""
+    token = os.getenv("NOTIFY_BOT_TOKEN")
+    admin_id = os.getenv("MANAGER_ID")
+    if not token or not admin_id:
+        logger.warning("NOTIFY_BOT_TOKEN или MANAGER_ID не заданы. Уведомление не отправлено.")
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json={"chat_id": admin_id, "text": text, "parse_mode": "HTML"})
+    except Exception as e:
+        logger.error(f"Admin notification failed: {e}")
+
 # ── Системный промпт — личность Андрея ───────────────────────────────────────
 def build_system_prompt(catalog: List[Dict[str, Any]]) -> str:
     """
@@ -140,6 +155,11 @@ async def get_assistant_reply(
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
+                # Проверка: если OpenRouter вернул код оплаты 402 (нет денег)
+                if resp.status == 402:
+                    await notify_admin("🚨 <b>Внимание!</b> Закончились средства на балансе <b>OpenRouter</b> (AI-Genius).")
+                    return "⚠️ Цифровой Андрей временно недоступен — техническая пауза. Напиши напрямую!"
+
                 if resp.status == 401:
                     logger.error("Claude API: неверный ключ")
                     return "⚠️ Цифровой Андрей временно недоступен — техническая пауза. Напиши напрямую!"
@@ -149,7 +169,11 @@ async def get_assistant_reply(
                 data = await resp.json()
 
                 if "error" in data:
-                    logger.error(f"Claude API error: {json.dumps(data['error'], ensure_ascii=False)}")
+                    err_info = data["error"]
+                    logger.error(f"Claude API error: {json.dumps(err_info, ensure_ascii=False)}")
+                    # Дополнительная проверка: код 402 внутри JSON (OpenRouter часто отдает именно так)
+                    if err_info.get("code") == 402:
+                        await notify_admin("🚨 <b>Внимание!</b> Закончились средства на балансе <b>OpenRouter</b> (AI-Genius).")
                     return "⚠️ Что-то пошло не так. Напиши Андрею напрямую — он поможет!"
 
                 return data["choices"][0]["message"]["content"]
