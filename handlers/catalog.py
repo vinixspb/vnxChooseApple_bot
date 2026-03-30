@@ -44,10 +44,13 @@ async def cmd_reset(message: types.Message, state: FSMContext):
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, command: CommandObject, state: FSMContext):
     await state.clear()
+    
+    # Обработка перехода по ссылке из Группы (Deep Link: ?start=ai)
     if command.args == "ai":
         from handlers.assistant import _launch_assistant
         await _launch_assistant(message, state)
         return
+        
     await message.answer(MSG["welcome"], reply_markup=get_main_menu())
 
 @router.callback_query(F.data == "back_to_main")
@@ -72,7 +75,11 @@ async def run_step(callback, state, filters, idx):
         stage = store.STAGES[i]
         if stage in filters and filters[stage] != "*SKIPPED*":
             req_val = filters[stage]
-            data = [d for d in data if str(d.get(stage, "")).strip() == req_val or (req_val == "-" and not str(d.get(stage, "")).strip())]
+            data = [
+                d for d in data 
+                if str(d.get(stage, "")).strip() == req_val 
+                or (req_val == "-" and not str(d.get(stage, "")).strip())
+            ]
 
     if not data:
         return await callback.message.answer(MSG["out_of_stock"], reply_markup=get_main_menu())
@@ -204,6 +211,7 @@ async def handle_selection(callback: types.CallbackQuery, state: FSMContext):
     if val is None:
         await callback.message.answer(MSG["session_expired"], reply_markup=get_main_menu())
         return await state.clear()
+
     filters = s["filters"]
     filters[store.STAGES[s["idx"]]] = val
     await run_step(callback, state, filters, s["idx"] + 1)
@@ -286,15 +294,16 @@ async def finalize(callback, item, state):
         while len(cb_data.encode('utf-8')) > 60: cb_data = cb_data[:-1]
         kb.row(InlineKeyboardButton(text=BTN["other_color"], callback_data=cb_data))
         
-    # 2. 📸 AI магия
-    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
-    # 3. ✅ Подтвердить заказ
     kb.row(InlineKeyboardButton(text=BTN["confirm_order"], callback_data="confirm_order"))
-    # 4. ⬅️ Главное меню
+    kb.row(InlineKeyboardButton(text=BTN["magic"], callback_data="magic_tryon"))
     kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
 
+    # ФИКС: Берем базовую категорию из памяти, а не название модели
+    s = await state.get_data()
+    cat = s.get("filters", {}).get("cat", "iphone")
+
     img_url = item.get('image', '')
-    photo_url = img_url if str(img_url).startswith("http") else get_stub(item.get('model_group', ''))
+    photo_url = img_url if str(img_url).startswith("http") else get_stub(cat, item.get('model_group', ''))
 
     try:
         if callback.message.photo:
