@@ -9,14 +9,12 @@ from aiogram.filters import StateFilter
 from aiogram.enums import ChatAction
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardButton
 
 from states.product_states import ProductSelection
 from services.kie_service import KieService
 from services.messages import MSG, BTN, MAGIC_MESSAGES
 from keyboards import get_main_menu
-from utils.media import fetch_image_bytes
-from aiogram.types import InlineKeyboardButton
-
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -54,22 +52,20 @@ async def _animate_magic_msg(msg, stop_event: asyncio.Event):
 async def magic_process(message: types.Message, state: FSMContext):
     data = await state.get_data()
     title = data.get("title", "Apple девайс")
-    product_image_url = data.get("product_image_url", "")
     
     msg = await message.answer(MAGIC_MESSAGES[0])
     stop_event = asyncio.Event()
     animator = asyncio.create_task(_animate_magic_msg(msg, stop_event))
 
     try:
+        # 1. Скачиваем только фото пользователя
         file = await message.bot.get_file(message.photo[-1].file_id)
         user_photo_bytes = (await message.bot.download_file(file.file_path)).read()
         await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_PHOTO)
 
-        product_image_bytes = None
-        if product_image_url:
-            product_image_bytes = await fetch_image_bytes(product_image_url)
-
-        url = await kie_ai.generate_magic_image(user_photo_bytes, title, product_image_bytes=product_image_bytes)
+        # 2. ФИКС: Вызываем API магии только с фото юзера и названием товара (без product_image_bytes)
+        url = await kie_ai.generate_magic_image(user_photo_bytes, title)
+        
         if not url: raise ValueError("API returned empty URL")
 
         stop_event.set(); animator.cancel()
@@ -87,7 +83,7 @@ async def magic_process(message: types.Message, state: FSMContext):
     finally:
         await state.clear()
 
-# ФИКС ОШИБКИ ЗДЕСЬ (используем ~StateFilter)
+# Обработчик на случай, если фото отправлено вне режима магии
 @router.message(F.photo, ~StateFilter(ProductSelection.waiting_for_magic_photo))
 async def handle_photo_wrong_state(message: types.Message, state: FSMContext):
     current = await state.get_state()
