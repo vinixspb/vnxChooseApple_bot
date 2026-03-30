@@ -70,7 +70,10 @@ async def magic_process(message: types.Message, state: FSMContext):
 
         stop_event.set(); animator.cancel()
 
-        kb = InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔮 Больше в vnxORACLE", url="https://t.me/vnxORACLE_bot")).row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="🔮 Больше в vnxORACLE", url="https://t.me/vnxORACLE_bot"))
+        kb.row(InlineKeyboardButton(text=BTN["main_menu"], callback_data="back_to_main"))
+        
         await msg.delete()
         await message.answer_photo(url, caption=MSG["magic_result"].format(title=html.escape(title)), reply_markup=kb.as_markup())
     except RuntimeError as e:
