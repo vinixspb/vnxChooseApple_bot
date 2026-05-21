@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from aiogram import Router, types
 from aiogram.types import InlineKeyboardButton
@@ -7,12 +8,19 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 logger = logging.getLogger(__name__)
 
+_SUPPLIER_CHANNEL_ID = os.getenv("SUPPLIER_CHANNEL_ID")
+
+
 @router.channel_post()
 async def handle_channel_post(message: types.Message):
     """
     Автоматически сканирует посты в канале и добавляет релевантные кнопки.
     Использует регулярные выражения (re) для точного поиска слов и корней.
     """
+    # Не трогаем канал поставщика — им занимается price_watcher
+    if _SUPPLIER_CHANNEL_ID and str(message.chat.id) == str(_SUPPLIER_CHANNEL_ID):
+        return
+
     text = (message.text or message.caption or "").lower()
     if not text:
         return

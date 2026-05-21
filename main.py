@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 
 # 3. И только теперь наши роутеры
-from handlers import catalog, assistant, magic, group, channel
+from handlers import catalog, assistant, magic, group, channel, price_watcher
 from handlers.catalog import load_all
 
 
@@ -41,12 +41,14 @@ async def main():
     dp = Dispatcher()
 
     # ── Порядок роутеров КРИТИЧЕН ────────────────────────────────────────────
-    # 1. group     — фильтры для группы (Chat ID проверяется первым)
-    # 2. channel   — фильтры для канала
-    # 3. catalog   — воронка выбора товара (inline-кнопки, FSM selecting)
-    # 4. magic     — AI магия (FSM waiting_for_magic_photo)
-    # 5. assistant — catch-all текст/голос (FSM consulting + свободный ввод)
-    #                ↑ ВСЕГДА ПОСЛЕДНИМ — иначе перехватит группу и канал
+    # 1. price_watcher — канал поставщика (первым, чтобы перехватить до channel)
+    # 2. group         — фильтры для группы
+    # 3. channel       — фильтры для своего канала (кнопки к постам)
+    # 4. catalog       — воронка выбора товара (inline-кнопки, FSM selecting)
+    # 5. magic         — AI магия (FSM waiting_for_magic_photo)
+    # 6. assistant     — catch-all текст/голос (FSM consulting + свободный ввод)
+    #                    ↑ ВСЕГДА ПОСЛЕДНИМ — иначе перехватит группу и канал
+    dp.include_router(price_watcher.router)
     dp.include_router(group.router)
     dp.include_router(channel.router)
     dp.include_router(catalog.router)
