@@ -39,7 +39,7 @@ def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str 
 
 def calculate_markup(price: int | float) -> int:
     """
-    Алгоритм наценки из AiParser.gs:
+    Наценка для телефонов (фиксированная сумма):
     ≤ 40 000  → +4 000
     < 80 000  → +5 000
     ≥ 80 000  → +6 000
@@ -51,6 +51,34 @@ def calculate_markup(price: int | float) -> int:
         return int(price) + 5_000
     else:
         return int(price) + 6_000
+
+
+def calculate_markup_accessory(price: int | float) -> int:
+    """Наценка для аксессуаров: +20%."""
+    return round(float(price) * 1.20)
+
+
+def apply_markup(items: List[Dict]) -> List[Dict]:
+    """
+    Применяет наценку ко всему списку:
+    - телефоны (memory != '-') → calculate_markup
+    - аксессуары (memory == '-') → +20%
+    Возвращает новые копии словарей.
+    """
+    import copy
+    result = []
+    for item in items:
+        ic = copy.copy(item)
+        try:
+            raw = int(ic["price"])
+            if ic.get("memory", "-") == "-":
+                ic["price"] = str(calculate_markup_accessory(raw))
+            else:
+                ic["price"] = str(calculate_markup(raw))
+        except (ValueError, TypeError):
+            pass
+        result.append(ic)
+    return result
 
 
 def parse_price_list(text: str) -> List[Dict]:

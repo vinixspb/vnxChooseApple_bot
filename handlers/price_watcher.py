@@ -1,11 +1,10 @@
-import copy
 import logging
 import os
 
 from aiogram import Router, types, F
 from aiogram.filters import Filter
 
-from services.price_parser import parse_price_list, looks_like_price_list, calculate_markup
+from services.price_parser import parse_price_list, looks_like_price_list, apply_markup
 from services.sheets_writer import sync_price_list
 from services.price_publisher import publish_price
 import services.data_store as store
@@ -35,19 +34,6 @@ class IsSupplierChat(Filter):
         return str(message.chat.id) in ids
 
 
-def _apply_markup(items: list) -> list:
-    """Возвращает копию списка с применённой наценкой."""
-    result = []
-    for item in items:
-        item_copy = copy.copy(item)
-        try:
-            item_copy["price"] = str(calculate_markup(int(item_copy["price"])))
-        except (ValueError, TypeError):
-            pass
-        result.append(item_copy)
-    return result
-
-
 async def _process_price_message(message: types.Message) -> None:
     text = message.text or message.caption or ""
     if not text or not looks_like_price_list(text):
@@ -61,8 +47,8 @@ async def _process_price_message(message: types.Message) -> None:
         logger.warning("price_watcher: позиции не распознаны")
         return
 
-    # Применяем наценку
-    items = _apply_markup(raw_items)
+    # Применяем наценку (телефоны: фиксированно, аксессуары: +20%)
+    items = apply_markup(raw_items)
 
     # 1. Пишем в Google Sheets
     result = sync_price_list(items)
