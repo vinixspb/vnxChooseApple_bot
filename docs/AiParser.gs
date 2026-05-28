@@ -182,13 +182,14 @@ function calculateMarkup(rawPrice) {
   var price = parseFloat(rawPrice);
   if (isNaN(price) || price <= 0) return rawPrice;
 
-  if (price <= 40000) {
-    return price + 4000;
-  } else if (price < 80000) {
-    return price + 5000;
-  } else {
-    return price + 6000;
-  }
+  if (price < 30000)       return price + 2000;
+  else if (price < 40000)  return price + 3000;
+  else if (price < 80000)  return price + 4000;
+  else if (price < 100000) return price + 5000;
+  else if (price < 140000) return price + 6000;
+  else if (price < 200000) return price + 7000;
+  else                     return price + 8000;
+  // Аксессуары обрабатываются отдельно (+20%) через calculate_markup_accessory в Python
 }
 
 function syncWithCatalog() {

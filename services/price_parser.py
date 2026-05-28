@@ -39,18 +39,30 @@ def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str 
 
 def calculate_markup(price: int | float) -> int:
     """
-    Наценка для телефонов (фиксированная сумма):
-    ≤ 40 000  → +4 000
-    < 80 000  → +5 000
-    ≥ 80 000  → +6 000
+    Наценка для техники Apple (фиксированная сумма):
+    <  30 000  → +2 000
+    <  40 000  → +3 000
+    <  80 000  → +4 000
+    < 100 000  → +5 000
+    < 140 000  → +6 000
+    < 200 000  → +7 000
+    ≥ 200 000  → +8 000
     """
-    price = float(price)
-    if price <= 40_000:
-        return int(price) + 4_000
-    elif price < 80_000:
-        return int(price) + 5_000
+    p = float(price)
+    if p < 30_000:
+        return int(p) + 2_000
+    elif p < 40_000:
+        return int(p) + 3_000
+    elif p < 80_000:
+        return int(p) + 4_000
+    elif p < 100_000:
+        return int(p) + 5_000
+    elif p < 140_000:
+        return int(p) + 6_000
+    elif p < 200_000:
+        return int(p) + 7_000
     else:
-        return int(price) + 6_000
+        return int(p) + 8_000
 
 
 def calculate_markup_accessory(price: int | float) -> int:
