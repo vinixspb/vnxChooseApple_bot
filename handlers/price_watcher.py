@@ -1,11 +1,13 @@
+import copy
 import logging
 import os
 
 from aiogram import Router, types, F
 from aiogram.filters import Filter
 
-from services.price_parser import parse_price_list, looks_like_price_list
+from services.price_parser import parse_price_list, looks_like_price_list, calculate_markup
 from services.sheets_writer import sync_price_list
+from services.price_publisher import publish_price
 import services.data_store as store
 from services.sheets_manager import get_data_from_sheet, get_settings
 
@@ -18,8 +20,8 @@ OWNER_ID = os.getenv("MANAGER_ID")
 def _get_supplier_ids() -> set[str]:
     """
     Читает SUPPLIER_CHANNEL_ID из .env.
-    Поддерживает одно значение или несколько через запятую:
-    SUPPLIER_CHANNEL_ID=-1001111111111,-1002222222222
+    Поддерживает несколько ID через запятую:
+    SUPPLIER_CHANNEL_ID=-1001378091044,-1001562517847
     """
     raw = os.getenv("SUPPLIER_CHANNEL_ID", "")
     return {s.strip() for s in raw.split(",") if s.strip()}
@@ -33,24 +35,51 @@ class IsSupplierChat(Filter):
         return str(message.chat.id) in ids
 
 
+def _apply_markup(items: list) -> list:
+    """Возвращает копию списка с применённой наценкой."""
+    result = []
+    for item in items:
+        item_copy = copy.copy(item)
+        try:
+            item_copy["price"] = str(calculate_markup(int(item_copy["price"])))
+        except (ValueError, TypeError):
+            pass
+        result.append(item_copy)
+    return result
+
+
 async def _process_price_message(message: types.Message) -> None:
     text = message.text or message.caption or ""
     if not text or not looks_like_price_list(text):
         return
 
-    source = f"{message.chat.title or message.chat.id}"
-    logger.info(f"price_watcher: новый прайс из '{source}', парсю...")
+    source = message.chat.title or str(message.chat.id)
+    logger.info(f"price_watcher: прайс из '{source}'")
 
-    items = parse_price_list(text)
-    if not items:
+    raw_items = parse_price_list(text)
+    if not raw_items:
         logger.warning("price_watcher: позиции не распознаны")
         return
 
+    # Применяем наценку
+    items = _apply_markup(raw_items)
+
+    # 1. Пишем в Google Sheets
     result = sync_price_list(items)
     updated = result["updated"]
     added   = result["added"]
     ok      = updated > 0 or added > 0
 
+    # 2. Перезагружаем каталог в памяти
+    if ok:
+        store.CATALOG  = get_data_from_sheet()
+        store.SETTINGS = get_settings()
+        logger.info("price_watcher: каталог перезагружен")
+
+    # 3. Публикуем в канал @vnxSHOPprice
+    await publish_price(message.bot, items, source)
+
+    # 4. Уведомляем владельца
     if OWNER_ID:
         preview = "\n".join(
             f"• {i['title']} — {i['price']} ₽" for i in items[:12]
@@ -60,27 +89,20 @@ async def _process_price_message(message: types.Message) -> None:
 
         if ok:
             status = (
-                f"✅ <b>Каталог обновлён!</b>\n"
-                f"   Обновлено цен: <b>{updated}</b>\n"
-                f"   Добавлено новых: <b>{added}</b>"
+                f"✅ <b>Каталог обновлён</b>\n"
+                f"   Обновлено цен: {updated} | Добавлено: {added}"
             )
         else:
-            status = "⚠️ Прайс получен, но запись в Sheets не удалась. Проверь логи."
+            status = "⚠️ Прайс получен, запись в Sheets не удалась. Проверь логи."
 
         await message.bot.send_message(
             OWNER_ID,
             f"📥 <b>Новый прайс от поставщика</b>\n"
             f"Источник: <i>{source}</i>\n"
-            f"Распознано позиций: <b>{len(items)}</b>\n\n"
+            f"Позиций: <b>{len(items)}</b>\n\n"
             f"{preview}\n\n{status}",
             parse_mode="HTML",
         )
-
-    # Перезагружаем каталог в памяти бота
-    if ok:
-        store.CATALOG  = get_data_from_sheet()
-        store.SETTINGS = get_settings()
-        logger.info("price_watcher: каталог перезагружен")
 
 
 # ── Обработчик для каналов ───────────────────────────────────────────────────

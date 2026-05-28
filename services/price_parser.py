@@ -21,26 +21,44 @@ def _parse_memory(token: str) -> str:
     return token.upper().replace(" ", "")
 
 
-def _make_id(model_name: str, memory: str, sim: str, color: str) -> str:
+def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str = "") -> str:
     """
-    Генерирует ID в формате таблицы:
+    Генерирует ID, идентичный generateDeterministicId() из AiParser.gs:
     APPLEIPHONE17AIR-256GB-ESIM-CLOUDWHITE
     """
     def clean(s: str) -> str:
         return re.sub(r"[^A-Z0-9]", "", s.upper())
 
-    model_key = clean(model_name)[:25] or "UNKNOWN"
-    parts = [f"APPLE{model_key}"]
-
-    for val in [memory, sim, color]:
+    parts = [clean(item_group_id)[:25]]
+    for val in [memory, sim, color, region]:
         k = clean(val)
-        if k and k != "-":
+        if k and k not in ("-", ""):
             parts.append(k[:15])
+    return "-".join(filter(None, parts))
 
-    return "-".join(parts)
+
+def calculate_markup(price: int | float) -> int:
+    """
+    Алгоритм наценки из AiParser.gs:
+    ≤ 40 000  → +4 000
+    < 80 000  → +5 000
+    ≥ 80 000  → +6 000
+    """
+    price = float(price)
+    if price <= 40_000:
+        return int(price) + 4_000
+    elif price < 80_000:
+        return int(price) + 5_000
+    else:
+        return int(price) + 6_000
 
 
 def parse_price_list(text: str) -> List[Dict]:
+    """
+    Парсит текст оптового прайс-листа в структурированные записи.
+    Поля соответствуют HEADERS из AiParser.gs.
+    Цены — RAW (без наценки). Наценку применяет вызывающий код.
+    """
     results = []
     seen_ids = set()
 
@@ -70,7 +88,8 @@ def parse_price_list(text: str) -> List[Dict]:
                 parts = model_name.rsplit(" - ", 1)
                 model_name, color = parts[0].strip(), parts[1].strip()
 
-            item_id = _make_id(model_name, "-", "-", color)
+            item_group_id = model_name
+            item_id = _make_id(item_group_id, "-", "-", color)
             if item_id in seen_ids:
                 continue
             seen_ids.add(item_id)
@@ -78,16 +97,17 @@ def parse_price_list(text: str) -> List[Dict]:
             title_parts = [p for p in [model_name, color] if p and p != "-"]
             results.append(
                 {
-                    "id":           item_id,
-                    "title":        " ".join(title_parts),
-                    "availability": "in stock",
-                    "price":        price,
-                    "item_group_id": model_name,
-                    "color":        color,
-                    "sim":          "-",
-                    "size":         "-",
-                    "memory_ssd":   "-",
-                    "region_custom": "-",
+                    "id":            item_id,
+                    "title":         " ".join(title_parts),
+                    "availability":  "in stock",
+                    "price":         price,
+                    "brand":         "Apple",
+                    "item_group_id": item_group_id,
+                    "color":         color,
+                    "sim":           "-",
+                    "size":          "-",
+                    "memory":        "-",
+                    "region":        "-",
                 }
             )
             continue
@@ -99,7 +119,7 @@ def parse_price_list(text: str) -> List[Dict]:
         if not mem_match:
             continue
 
-        memory    = _parse_memory(mem_match.group(1))
+        memory     = _parse_memory(mem_match.group(1))
         model_part = content[: mem_match.start()].strip(" ,")
         rest       = content[mem_match.end() :].strip()
 
@@ -114,7 +134,7 @@ def parse_price_list(text: str) -> List[Dict]:
             sim   = "-"
             color = rest.strip().strip(",")
 
-        # Нормализация названия модели (с префиксом iPhone)
+        # Нормализация модели
         if re.match(r"^1[5-9](\s|$)", model_part) or re.match(r"^2\d(\s|$)", model_part):
             model_name = "iPhone " + model_part
         elif re.match(r"Air\b", model_part, re.IGNORECASE):
@@ -128,27 +148,26 @@ def parse_price_list(text: str) -> List[Dict]:
         color      = color.strip() or "-"
         sim        = sim.strip() or "-"
 
-        item_id = _make_id(model_name, memory, sim, color)
+        item_group_id = f"Apple {model_name}"
+        item_id       = _make_id(item_group_id, memory, sim, color)
+
         if item_id in seen_ids:
             continue
         seen_ids.add(item_id)
 
-        # item_group_id и title с "Apple" — как в таблице
-        item_group = f"Apple {model_name}"
-        title      = f"Apple {model_name} {memory} {color} {sim}".strip()
-
         results.append(
             {
                 "id":            item_id,
-                "title":         title,
+                "title":         f"Apple {model_name} {memory} {color} {sim}".strip(),
                 "availability":  "in stock",
                 "price":         price,
-                "item_group_id": item_group,
+                "brand":         "Apple",
+                "item_group_id": item_group_id,
                 "color":         color,
                 "sim":           sim,
                 "size":          "-",
-                "memory_ssd":    memory,
-                "region_custom": "-",
+                "memory":        memory,
+                "region":        "-",
             }
         )
 

@@ -96,38 +96,43 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP", retries: int = 3) -> List[D
                 # Физический размер (диагональ / mm)
                 size_val = str(row.get("size", "")).strip() or "-"
 
-                # ── Кастомные столбцы в конце таблицы ─────────────────────
-                # memory_ssd: хранилище для iPhone/iPad/Mac (256GB, 512GB, 1TB)
-                # memory_ram: ОЗУ только для Mac/iMac (16GB, 24GB, 32GB)
-                memory_ssd = str(row.get("memory_ssd", "")).strip() or "-"
+                # ── Память ────────────────────────────────────────────────────
+                # Основной столбец по AiParser.gs: "memory"
+                # Fallback для старых листов: "memory_ssd"
+                memory_val = (
+                    str(row.get("memory", "")).strip()
+                    or str(row.get("memory_ssd", "")).strip()
+                    or "-"
+                )
                 memory_ram = str(row.get("memory_ram", "")).strip() or "-"
 
-                # custom_label_0 = регион (International / Россия / EU)
-                # Сначала пробуем колонку custom_label_0, потом старый _extract_region
-                custom_label_0 = str(row.get("custom_label_0", "")).strip()
-                if not custom_label_0 or custom_label_0 in ("0", "-", ""):
-                    custom_label_0 = _extract_region(row)
-
-                custom_label_1 = str(row.get("custom_label_1", "")).strip() or "-"
-                custom_label_2 = str(row.get("custom_label_2", "")).strip() or "-"
+                # ── Регион ────────────────────────────────────────────────────
+                # Основной столбец по AiParser.gs: "region"
+                # Fallback: custom_label_0 → _extract_region
+                region_val = (
+                    str(row.get("region", "")).strip()
+                    or str(row.get("region_custom", "")).strip()
+                    or str(row.get("custom_label_0", "")).strip()
+                    or _extract_region(row)
+                    or "-"
+                )
+                if region_val in ("0", ""):
+                    region_val = "-"
 
                 entry = {
-                    "id":             str(row.get("id", "")).strip(),
-                    "title":          str(row.get("title", "")).strip(),
-                    "availability":   str(row.get("availability", "out of stock")).strip(),
-                    "price":          price,
-                    "image":          str(row.get("image_link", "")).strip(),
-                    "color":          color,
-                    "size":           size_val,
-                    "memory":         memory_ssd,  # Главный ключ для воронки, берет данные из memory_ssd
-                    "memory_ssd":     memory_ssd,
-                    "memory_ram":     memory_ram,
-                    "sim":            sim,
-                    "model_group":    model_group,
-                    "region":         custom_label_0,
-                    "custom_label_0": custom_label_0,
-                    "custom_label_1": custom_label_1,
-                    "custom_label_2": custom_label_2,
+                    "id":           str(row.get("id", "")).strip(),
+                    "title":        str(row.get("title", "")).strip(),
+                    "availability": str(row.get("availability", "out of stock")).strip(),
+                    "price":        price,
+                    "image":        str(row.get("image_link", "")).strip(),
+                    "color":        color,
+                    "size":         size_val,
+                    "memory":       memory_val,
+                    "memory_ssd":   memory_val,
+                    "memory_ram":   memory_ram,
+                    "sim":          sim,
+                    "model_group":  model_group,
+                    "region":       region_val,
                 }
                 cleaned.append(entry)
 
