@@ -32,6 +32,8 @@ def _fmt_sim(sim: str) -> str:
         "nano+esim": "Nano + eSIM",
         "nano+nano": "Nano + Nano",
         "nanoesim":  "Nano + eSIM",
+        "wifi":      "WiFi",
+        "lte":       "LTE",
     }
     return mapping.get(sim.lower().replace(" ", ""), sim)
 

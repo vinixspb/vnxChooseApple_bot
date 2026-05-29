@@ -1,13 +1,20 @@
 import re
 from typing import List, Dict
 
+# Compiled once — strips all emoji, flags, variation selectors
+_EMOJI_RE = re.compile(
+    r"[\U0001F1E6-\U0001F1FF]{2}"   # country flags  🇺🇸 🇷🇺
+    r"|[\U0001F300-\U0001F9FF]"      # misc symbols & pictographs
+    r"|[\U0001FA00-\U0001FA9F]"      # extended pictographs
+    r"|[☀-➿]"             # dingbats / misc symbols (☀ ⚫ ✅ ...)
+    r"|[︀-️]"             # variation selectors (️ after ⚫)
+    r"|[®©™]+",
+    re.UNICODE,
+)
+
 
 def _strip_emoji(text: str) -> str:
-    return re.sub(
-        r"[\U0001F300-\U0001F9FF☀-➿\U0001FA00-\U0001FA9F®©™]+",
-        "",
-        text,
-    ).strip()
+    return _EMOJI_RE.sub("", text).strip()
 
 
 def _parse_memory(token: str) -> str:
@@ -23,7 +30,7 @@ def _parse_memory(token: str) -> str:
 
 def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str = "") -> str:
     """
-    Генерирует ID, идентичный generateDeterministicId() из AiParser.gs:
+    Generates an ID identical to generateDeterministicId() in AiParser.gs:
     APPLEIPHONE17AIR-256GB-ESIM-CLOUDWHITE
     """
     def clean(s: str) -> str:
@@ -37,16 +44,28 @@ def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str 
     return "-".join(filter(None, parts))
 
 
+def _region_from_sim(sim: str) -> str:
+    """Infer iPhone region from SIM configuration (mirrors AiParser.gs rule 11)."""
+    s = sim.lower().replace(" ", "").replace("+", "")
+    if s == "esim":
+        return "Америка"
+    if "nanoesim" in s:
+        return "Европа"
+    if "nanonano" in s:
+        return "Китай"
+    return "-"
+
+
 def calculate_markup(price: int | float) -> int:
     """
-    Наценка для техники Apple (фиксированная сумма):
-    <  30 000  → +2 000
-    <  40 000  → +3 000
-    <  80 000  → +4 000
-    < 100 000  → +5 000
-    < 140 000  → +6 000
-    < 200 000  → +7 000
-    ≥ 200 000  → +8 000
+    Graduated markup for Apple hardware (fixed amounts):
+    <  30 000 → +2 000
+    <  40 000 → +3 000
+    <  80 000 → +4 000
+    < 100 000 → +5 000
+    < 140 000 → +6 000
+    < 200 000 → +7 000
+    ≥ 200 000 → +8 000
     """
     p = float(price)
     if p < 30_000:
@@ -66,16 +85,15 @@ def calculate_markup(price: int | float) -> int:
 
 
 def calculate_markup_accessory(price: int | float) -> int:
-    """Наценка для аксессуаров: +20%."""
+    """Accessories markup: +20%."""
     return round(float(price) * 1.20)
 
 
 def apply_markup(items: List[Dict]) -> List[Dict]:
     """
-    Применяет наценку ко всему списку.
-    - Сохраняет сырую цену в поле purchase_price (→ столбец purchase_price в Sheets).
-    - В поле price записывает итоговую продажную цену.
-    - Телефоны → calculate_markup, аксессуары (memory='-') → +20%.
+    Applies markup to all items.
+    - Saves raw price as purchase_price (→ column M in Sheets).
+    - Phones → tiered markup; accessories (memory='-') → +20%.
     """
     import copy
     result = []
@@ -83,7 +101,7 @@ def apply_markup(items: List[Dict]) -> List[Dict]:
         ic = copy.copy(item)
         try:
             raw = int(ic["price"])
-            ic["purchase_price"] = str(raw)          # закупочная — в таблицу
+            ic["purchase_price"] = str(raw)
             if ic.get("memory", "-") == "-":
                 ic["price"] = str(calculate_markup_accessory(raw))
             else:
@@ -96,19 +114,19 @@ def apply_markup(items: List[Dict]) -> List[Dict]:
 
 def parse_price_list(text: str) -> List[Dict]:
     """
-    Парсит текст оптового прайс-листа в структурированные записи.
-    Поля соответствуют HEADERS из AiParser.gs.
-    Цены — RAW (без наценки). Наценку применяет вызывающий код.
+    Parses wholesale price list text into structured records.
+    Field names match HEADERS in AiParser.gs.
+    Prices are RAW (without markup). Caller applies markup via apply_markup().
     """
     results = []
-    seen_ids = set()
+    seen_ids: set = set()
 
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
 
-        # Цена — цифры (с пробелами) в конце строки после тире
+        # Price — digits (with spaces) at end of line after dash
         price_match = re.search(r"-\s*([\d\s]{4,})$", line)
         if not price_match:
             continue
@@ -118,10 +136,11 @@ def parse_price_list(text: str) -> List[Dict]:
 
         content = line[: price_match.start()].strip()
         content = _strip_emoji(content)
+        content = content.strip(" -")   # drop any leading/trailing dashes left after emoji strip
         if not content:
             continue
 
-        # ── Аксессуары ──────────────────────────────────────────────────────
+        # ── Accessories ──────────────────────────────────────────────────────
         if re.search(r"Чехол|Case|AirTag|кабель|Cable|Зарядк", content, re.IGNORECASE):
             model_name = content
             color = "-"
@@ -136,24 +155,22 @@ def parse_price_list(text: str) -> List[Dict]:
             seen_ids.add(item_id)
 
             title_parts = [p for p in [model_name, color] if p and p != "-"]
-            results.append(
-                {
-                    "id":            item_id,
-                    "title":         " ".join(title_parts),
-                    "availability":  "in stock",
-                    "price":         price,
-                    "brand":         "Apple",
-                    "item_group_id": item_group_id,
-                    "color":         color,
-                    "sim":           "-",
-                    "size":          "-",
-                    "memory":        "-",
-                    "region":        "-",
-                }
-            )
+            results.append({
+                "id":            item_id,
+                "title":         " ".join(title_parts),
+                "availability":  "in stock",
+                "price":         price,
+                "brand":         "Apple",
+                "item_group_id": item_group_id,
+                "color":         color,
+                "sim":           "-",
+                "size":          "-",
+                "memory":        "-",
+                "region":        "-",
+            })
             continue
 
-        # ── Телефоны ─────────────────────────────────────────────────────────
+        # ── Phones & Tablets ─────────────────────────────────────────────────
         mem_match = re.search(
             r"\b(64|128|256|512|1[Tt][Bb]|2[Tt][Bb]|4[Tt][Bb])\b", content
         )
@@ -164,7 +181,29 @@ def parse_price_list(text: str) -> List[Dict]:
         model_part = content[: mem_match.start()].strip(" ,")
         rest       = content[mem_match.end() :].strip()
 
-        # SIM
+        # ── Detect WiFi / LTE (for tablets) ──────────────────────────────────
+        # Check model_part first (e.g., "Pro M4 13 2024 Wi-Fi")
+        _wifi_re = re.compile(r"\b(Wi[-\s]?Fi|WiFi|LTE)\b", re.IGNORECASE)
+
+        conn_in_model = _wifi_re.search(model_part)
+        if conn_in_model:
+            raw_conn = conn_in_model.group(1)
+            connectivity = "WiFi" if re.search(r"fi", raw_conn, re.IGNORECASE) else "LTE"
+            model_part = (
+                model_part[: conn_in_model.start()] + model_part[conn_in_model.end() :]
+            ).strip(" ,")
+        else:
+            conn_in_rest = _wifi_re.search(rest)
+            if conn_in_rest:
+                raw_conn = conn_in_rest.group(1)
+                connectivity = "WiFi" if re.search(r"fi", raw_conn, re.IGNORECASE) else "LTE"
+                rest = (
+                    rest[: conn_in_rest.start()] + rest[conn_in_rest.end() :]
+                ).strip(" ,")
+            else:
+                connectivity = ""
+
+        # ── Detect SIM type (for phones) ─────────────────────────────────────
         sim_match = re.search(
             r"(Nano\s*\+\s*eSim|Nano\s*\+\s*Nano|eSim)", rest, re.IGNORECASE
         )
@@ -172,22 +211,54 @@ def parse_price_list(text: str) -> List[Dict]:
             sim   = sim_match.group(1).strip()
             color = rest[: sim_match.start()].strip().strip(",")
         else:
-            sim   = "-"
+            # Tablets → connectivity is the SIM field; phones without SIM → "-"
+            sim   = connectivity if connectivity else "-"
             color = rest.strip().strip(",")
 
-        # Нормализация модели
-        if re.match(r"^1[5-9](\s|$)", model_part) or re.match(r"^2\d(\s|$)", model_part):
+        # ── Model name normalisation ──────────────────────────────────────────
+        if re.match(r"^iPad\b", model_part, re.IGNORECASE):
+            # "iPad 2025", "iPad 2021 10.2"
+            model_name = model_part
+
+        elif re.match(r"^Mini\b", model_part, re.IGNORECASE):
+            # "Mini 6" → "iPad Mini 6"
+            suffix = re.sub(r"^Mini\s*", "", model_part, flags=re.IGNORECASE).strip()
+            model_name = "iPad Mini " + suffix if suffix else "iPad Mini"
+
+        elif re.match(r"^Air\s+M\d", model_part, re.IGNORECASE):
+            # "Air M3 11 2025" → "iPad Air M3 11 2025"
+            suffix = re.sub(r"^Air\s+", "", model_part, flags=re.IGNORECASE).strip()
+            model_name = "iPad Air " + suffix
+
+        elif re.match(r"^Pro\s+M\d", model_part, re.IGNORECASE):
+            # "Pro M4 11 2024" → "iPad Pro M4 11 2024"
+            suffix = re.sub(r"^Pro\s+", "", model_part, flags=re.IGNORECASE).strip()
+            model_name = "iPad Pro " + suffix
+
+        elif re.match(r"^1[5-9](\s|$)", model_part) or re.match(r"^2\d(\s|$)", model_part):
+            # "17 128" → "iPhone 17", "16 Pro Max" → "iPhone 16 Pro Max"
             model_name = "iPhone " + model_part
-        elif re.match(r"Air\b", model_part, re.IGNORECASE):
+
+        elif re.match(r"^Air$", model_part.strip(), re.IGNORECASE):
+            # Shorthand "Air" in iPhone price list = iPhone 17 Air
             model_name = "iPhone 17 Air"
-        elif model_part.lower().startswith("pro max"):
+
+        elif model_part.strip().lower().startswith("pro max"):
             model_name = "iPhone Pro Max"
+
         else:
-            model_name = model_part if model_part else "iPhone"
+            model_name = model_part.strip() if model_part.strip() else "iPhone"
 
         model_name = model_name.strip()
         color      = color.strip() or "-"
         sim        = sim.strip() or "-"
+
+        # ── Region ────────────────────────────────────────────────────────────
+        is_tablet = any(
+            kw in model_name.lower()
+            for kw in ("ipad", "ipad mini", "ipad air", "ipad pro")
+        )
+        region = "-" if is_tablet else _region_from_sim(sim)
 
         item_group_id = f"Apple {model_name}"
         item_id       = _make_id(item_group_id, memory, sim, color)
@@ -196,26 +267,31 @@ def parse_price_list(text: str) -> List[Dict]:
             continue
         seen_ids.add(item_id)
 
-        results.append(
-            {
-                "id":            item_id,
-                "title":         f"Apple {model_name} {memory} {color} {sim}".strip(),
-                "availability":  "in stock",
-                "price":         price,
-                "brand":         "Apple",
-                "item_group_id": item_group_id,
-                "color":         color,
-                "sim":           sim,
-                "size":          "-",
-                "memory":        memory,
-                "region":        "-",
-            }
-        )
+        # ── Title: skip fields that are "-" ───────────────────────────────────
+        title_parts = [f"Apple {model_name}", memory]
+        if color and color != "-":
+            title_parts.append(color)
+        if sim and sim != "-":
+            title_parts.append(sim)
+
+        results.append({
+            "id":            item_id,
+            "title":         " ".join(title_parts),
+            "availability":  "in stock",
+            "price":         price,
+            "brand":         "Apple",
+            "item_group_id": item_group_id,
+            "color":         color,
+            "sim":           sim,
+            "size":          "-",
+            "memory":        memory,
+            "region":        region,
+        })
 
     return results
 
 
 def looks_like_price_list(text: str) -> bool:
-    """Эвристика: минимум 3 строки с ценой в конце."""
+    """Heuristic: at least 3 lines with price at end."""
     hits = sum(1 for line in text.splitlines() if re.search(r"-\s*\d{4,}\s*$", line))
     return hits >= 3

@@ -98,10 +98,14 @@ def get_data_from_sheet(sheet_name: str = "vnxSHOP", retries: int = 3) -> List[D
 
                 # ── Память ────────────────────────────────────────────────────
                 # Основной столбец по AiParser.gs: "memory"
-                # Fallback для старых листов: "memory_ssd"
+                # Fallback 1: "memory_ssd" (старые листы)
+                # Fallback 2: "size" если содержит только цифры (IPHC-строки с опечаткой)
+                _size_raw = str(row.get("size", "")).strip()
+                _size_as_mem = _size_raw if re.match(r"^\d+$", _size_raw) else ""
                 memory_val = (
                     str(row.get("memory", "")).strip()
                     or str(row.get("memory_ssd", "")).strip()
+                    or _size_as_mem
                     or "-"
                 )
                 memory_ram = str(row.get("memory_ram", "")).strip() or "-"
