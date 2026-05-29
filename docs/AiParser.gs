@@ -7,10 +7,12 @@ var MODEL_ID = "gemini-2.5-flash";
 var HEADERS = [
   "id", "title", "description", "availability", "condition", "price", "link",
   "image_link", "brand", "google_product_category", "fb_product_category",
-  "quantity_to_sell_on_facebook", "sale_price", "sale_price_effective_date",
+  "quantity_to_sell_on_facebook", "purchase_price", "sale_price_effective_date",
   "item_group_id", "gender", "color", "size", "age_group", "material",
   "pattern", "shipping", "shipping_weight", "gtin", "memory", "sim", "region"
 ];
+// purchase_price (col M) = закупочная цена без наценки
+// price          (col F) = продажная цена с наценкой (видит покупатель)
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('🍏 AI ПАРСЕР')

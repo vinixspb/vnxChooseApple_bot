@@ -9,11 +9,13 @@ from services.sheets_manager import authorize_gspread
 
 logger = logging.getLogger(__name__)
 
-# Столбцы соответствуют HEADERS в AiParser.gs (27 столбцов)
+# Столбцы таблицы vnxSHOP (27 столбцов).
+# purchase_price (M) = закупочная цена без наценки.
+# price          (F) = продажная цена (с наценкой) — то что видит покупатель.
 _COLUMNS = [
     "id", "title", "description", "availability", "condition",
     "price", "link", "image_link", "brand", "google_product_category",
-    "fb_product_category", "quantity_to_sell_on_facebook", "sale_price",
+    "fb_product_category", "quantity_to_sell_on_facebook", "purchase_price",
     "sale_price_effective_date", "item_group_id", "gender", "color",
     "size", "age_group", "material", "pattern", "shipping",
     "shipping_weight", "gtin", "memory", "sim", "region",
@@ -29,7 +31,7 @@ _DEFAULTS: Dict[str, str] = {
     "google_product_category":      "Electronics",
     "fb_product_category":          "",
     "quantity_to_sell_on_facebook": "",
-    "sale_price":                   "",
+    "purchase_price":               "",
     "sale_price_effective_date":    "",
     "gender":                       "",
     "size":                         "",
@@ -87,9 +89,10 @@ def sync_price_list(
             header = all_values[0]
 
             try:
-                id_col    = header.index("id") + 1
-                price_col = header.index("price") + 1
-                avail_col = header.index("availability") + 1
+                id_col       = header.index("id") + 1
+                price_col    = header.index("price") + 1
+                avail_col    = header.index("availability") + 1
+                purchase_col = header.index("purchase_price") + 1 if "purchase_price" in header else None
             except ValueError as e:
                 logger.error(f"Столбец не найден: {e}")
                 return {"updated": 0, "added": 0}
@@ -108,7 +111,7 @@ def sync_price_list(
                 item_id = item.get("id", "")
                 if item_id in id_to_row:
                     row_num = id_to_row[item_id]
-                    # Обновляем цену и наличие
+                    # Обновляем продажную цену, закупочную и наличие
                     batch_updates.append({
                         "range": gu.rowcol_to_a1(row_num, price_col),
                         "values": [[item["price"]]],
@@ -117,6 +120,11 @@ def sync_price_list(
                         "range": gu.rowcol_to_a1(row_num, avail_col),
                         "values": [["in stock"]],
                     })
+                    if purchase_col and item.get("purchase_price"):
+                        batch_updates.append({
+                            "range": gu.rowcol_to_a1(row_num, purchase_col),
+                            "values": [[item["purchase_price"]]],
+                        })
                 else:
                     new_rows.append(_build_row(item, header))
 
@@ -126,7 +134,8 @@ def sync_price_list(
             if new_rows:
                 ws.append_rows(new_rows, value_input_option="USER_ENTERED")
 
-            updated = len(batch_updates) // 2
+            # Считаем уникальные обновлённые строки (не ячейки)
+            updated = len({b["range"][1:] for b in batch_updates})
             added   = len(new_rows)
             logger.info(f"sync: обновлено {updated}, добавлено {added} строк в '{sheet_name}'")
             return {"updated": updated, "added": added}

@@ -72,10 +72,10 @@ def calculate_markup_accessory(price: int | float) -> int:
 
 def apply_markup(items: List[Dict]) -> List[Dict]:
     """
-    Применяет наценку ко всему списку:
-    - телефоны (memory != '-') → calculate_markup
-    - аксессуары (memory == '-') → +20%
-    Возвращает новые копии словарей.
+    Применяет наценку ко всему списку.
+    - Сохраняет сырую цену в поле purchase_price (→ столбец purchase_price в Sheets).
+    - В поле price записывает итоговую продажную цену.
+    - Телефоны → calculate_markup, аксессуары (memory='-') → +20%.
     """
     import copy
     result = []
@@ -83,12 +83,13 @@ def apply_markup(items: List[Dict]) -> List[Dict]:
         ic = copy.copy(item)
         try:
             raw = int(ic["price"])
+            ic["purchase_price"] = str(raw)          # закупочная — в таблицу
             if ic.get("memory", "-") == "-":
                 ic["price"] = str(calculate_markup_accessory(raw))
             else:
                 ic["price"] = str(calculate_markup(raw))
         except (ValueError, TypeError):
-            pass
+            ic.setdefault("purchase_price", "")
         result.append(ic)
     return result
 
