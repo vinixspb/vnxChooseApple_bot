@@ -3,15 +3,13 @@
 Ручной запуск обновления прайса.
 
 Запуск:
-  python run_price_update.py              — интерактивный ввод
+  python run_price_update.py              — интерактивный ввод (Ctrl+D для завершения)
   python run_price_update.py < price.txt  — из файла
 """
 import os
 import sys
 
-# Принудительно UTF-8 для stdin/stdout (решает проблему с русской раскладкой)
-if sys.stdin.encoding and sys.stdin.encoding.lower() != "utf-8":
-    sys.stdin = open(sys.stdin.fileno(), mode="r", encoding="utf-8", errors="replace", buffering=1)
+# Принудительно UTF-8 для stdout
 sys.stdout = open(sys.stdout.fileno(), mode="w", encoding="utf-8", errors="replace", buffering=1)
 
 # Загружаем .env до всех импортов
@@ -20,8 +18,6 @@ load_dotenv()
 
 from services.price_parser import parse_price_list, apply_markup, looks_like_price_list
 from services.sheets_writer import sync_price_list
-import services.data_store as store
-from services.sheets_manager import get_data_from_sheet, get_settings
 
 
 def _fmt(price: str) -> str:
@@ -31,25 +27,32 @@ def _fmt(price: str) -> str:
         return price
 
 
+def _read_tty_line(prompt: str) -> str:
+    """Читает строку напрямую из /dev/tty, минуя stdin (не подвержен буферу вставки)."""
+    try:
+        with open("/dev/tty", "r") as tty:
+            sys.stderr.write(prompt)
+            sys.stderr.flush()
+            return tty.readline().strip()
+    except OSError:
+        # /dev/tty недоступен (например, в CI/CD) — возвращаем пустую строку
+        return ""
+
+
 def main():
-    # Читаем текст — из stdin или интерактивно
-    if not sys.stdin.isatty():
-        text = sys.stdin.read()
-    else:
+    is_tty = sys.stdin.isatty()
+
+    if is_tty:
         print("=" * 60)
         print("  vnxSHOP — Ручное обновление прайса")
         print("=" * 60)
-        print("Вставь прайс-лист и нажми Enter дважды:\n")
-        lines = []
-        try:
-            while True:
-                line = input()
-                if not line and lines and not lines[-1]:
-                    break
-                lines.append(line)
-        except EOFError:
-            pass
-        text = "\n".join(lines)
+        print("Вставь прайс-лист и нажми Ctrl+D в новой строке:\n")
+
+    try:
+        text = sys.stdin.read()
+    except KeyboardInterrupt:
+        print("\nОтменено.")
+        sys.exit(0)
 
     text = text.strip()
     if not text:
@@ -78,15 +81,13 @@ def main():
         title = item['title'][:col_w]
         print(f"  {title:<{col_w}} {_fmt(raw_item['price']):>8}  {_fmt(item['price']):>9} ₽")
 
-    # Подтверждение
     print()
-    if sys.stdin.isatty():
-        try:
-            confirm = input("Записать в Google Sheets (vnxSHOP)? [y/N]: ").strip().lower()
-        except UnicodeDecodeError:
-            confirm = "y"  # нажата 'у' с русской раскладки — считаем как подтверждение
+
+    # Подтверждение — читаем из /dev/tty чтобы избежать буфера вставки
+    if is_tty:
+        answer = _read_tty_line("Записать в Google Sheets (vnxSHOP)? [y/N]: ").lower()
         # принимаем латинскую y, кириллическую у, и да
-        if confirm not in ("y", "у", "yes", "да"):
+        if answer not in ("y", "у", "yes", "да"):
             print("Отменено.")
             sys.exit(0)
     else:
@@ -104,9 +105,6 @@ def main():
     print(f"\n✅ Готово!")
     print(f"   Обновлено цен:   {updated}")
     print(f"   Добавлено новых: {added}")
-
-    # Перезагружаем каталог в памяти (если запущен в том же процессе — не актуально,
-    # но при перезапуске бота он сам подхватит из Sheets)
     print("\n💡 Перезапусти бота чтобы каталог подгрузился:")
     print("   systemctl restart vnx-apple-shop.service")
 
