@@ -9,6 +9,11 @@
 import os
 import sys
 
+# Принудительно UTF-8 для stdin/stdout (решает проблему с русской раскладкой)
+if sys.stdin.encoding and sys.stdin.encoding.lower() != "utf-8":
+    sys.stdin = open(sys.stdin.fileno(), mode="r", encoding="utf-8", errors="replace", buffering=1)
+sys.stdout = open(sys.stdout.fileno(), mode="w", encoding="utf-8", errors="replace", buffering=1)
+
 # Загружаем .env до всех импортов
 from dotenv import load_dotenv
 load_dotenv()
@@ -76,8 +81,12 @@ def main():
     # Подтверждение
     print()
     if sys.stdin.isatty():
-        confirm = input("Записать в Google Sheets (vnxSHOP)? [y/N]: ").strip().lower()
-        if confirm != "y":
+        try:
+            confirm = input("Записать в Google Sheets (vnxSHOP)? [y/N]: ").strip().lower()
+        except UnicodeDecodeError:
+            confirm = "y"  # нажата 'у' с русской раскладки — считаем как подтверждение
+        # принимаем латинскую y, кириллическую у, и да
+        if confirm not in ("y", "у", "yes", "да"):
             print("Отменено.")
             sys.exit(0)
     else:
