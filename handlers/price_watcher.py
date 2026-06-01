@@ -114,13 +114,25 @@ async def _process_price_message(message: types.Message) -> None:
         )
 
 
-# ── Обработчик для каналов ───────────────────────────────────────────────────
+# ── Каналы: новые посты ──────────────────────────────────────────────────────
 @router.channel_post(IsSupplierChat())
 async def on_supplier_channel_post(message: types.Message):
     await _process_price_message(message)
 
 
-# ── Обработчик для групп и супергрупп ───────────────────────────────────────
+# ── Каналы: РЕДАКТИРОВАНИЕ (поставщик меняет цены в уже опубликованном посте)
+@router.edited_channel_post(IsSupplierChat())
+async def on_supplier_channel_post_edited(message: types.Message):
+    await _process_price_message(message)
+
+
+# ── Группы/супергруппы: новые сообщения ─────────────────────────────────────
 @router.message(IsSupplierChat(), F.chat.type.in_({"group", "supergroup"}))
 async def on_supplier_group_message(message: types.Message):
+    await _process_price_message(message)
+
+
+# ── Группы/супергруппы: РЕДАКТИРОВАНИЕ ──────────────────────────────────────
+@router.edited_message(IsSupplierChat(), F.chat.type.in_({"group", "supergroup"}))
+async def on_supplier_group_message_edited(message: types.Message):
     await _process_price_message(message)

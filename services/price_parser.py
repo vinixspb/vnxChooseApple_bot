@@ -141,7 +141,10 @@ def parse_price_list(text: str) -> List[Dict]:
             continue
 
         # ── Accessories ──────────────────────────────────────────────────────
-        if re.search(r"Чехол|Case|AirTag|кабель|Cable|Зарядк", content, re.IGNORECASE):
+        if re.search(
+            r"Чехол|Case|AirTag|кабель|Cable|Зарядк|Стекло|Glass|Защитн|Tempered|Screen",
+            content, re.IGNORECASE,
+        ):
             model_name = content
             color = "-"
             if " - " in model_name:
@@ -292,6 +295,6 @@ def parse_price_list(text: str) -> List[Dict]:
 
 
 def looks_like_price_list(text: str) -> bool:
-    """Heuristic: at least 3 lines with price at end."""
-    hits = sum(1 for line in text.splitlines() if re.search(r"-\s*\d{4,}\s*$", line))
+    """Heuristic: at least 3 lines ending with '- NNN' (3+ digits)."""
+    hits = sum(1 for line in text.splitlines() if re.search(r"-\s*\d{3,}\s*$", line))
     return hits >= 3
