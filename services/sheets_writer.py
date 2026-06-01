@@ -3,6 +3,7 @@ import os
 import time
 from typing import List, Dict, Any
 
+import gspread
 import gspread.utils as gu
 
 from services.sheets_manager import authorize_gspread
@@ -148,3 +149,71 @@ def sync_price_list(
                 logger.error(f"Sheets sync error: {e}")
 
     return {"updated": 0, "added": 0}
+
+
+_SYNCLOG_HEADERS = ["timestamp", "source", "updated", "added", "catalog_size"]
+
+
+def write_sync_log(
+    timestamp: str,
+    source: str,
+    updated: int,
+    added: int,
+    catalog_size: int,
+) -> None:
+    """
+    Appends one row to the SyncLog sheet.
+    Non-critical: errors are logged but never raised.
+    """
+    gc = authorize_gspread()
+    if not gc:
+        return
+
+    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    for attempt in range(2):
+        try:
+            spreadsheet = gc.open_by_key(spreadsheet_id)
+            try:
+                ws = spreadsheet.worksheet("SyncLog")
+            except gspread.exceptions.WorksheetNotFound:
+                ws = spreadsheet.add_worksheet("SyncLog", rows=500, cols=6)
+                ws.update([_SYNCLOG_HEADERS], value_input_option="USER_ENTERED")
+                ws.format("A1:E1", {"textFormat": {"bold": True}})
+
+            ws.append_rows(
+                [[timestamp, source, updated, added, catalog_size]],
+                value_input_option="USER_ENTERED",
+            )
+            return
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(1)
+            else:
+                logger.warning(f"write_sync_log: {e}")
+
+
+def get_last_sync_log() -> dict:
+    """
+    Returns the last row of SyncLog as a dict, or {} if unavailable.
+    Used by /status when LAST_SYNC is empty (fresh restart).
+    """
+    gc = authorize_gspread()
+    if not gc:
+        return {}
+
+    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    try:
+        ws = gc.open_by_key(spreadsheet_id).worksheet("SyncLog")
+        rows = ws.get_all_values()
+        if len(rows) < 2:
+            return {}
+        last = rows[-1]
+        return {
+            "time_str": last[0] if len(last) > 0 else "",
+            "source":   last[1] if len(last) > 1 else "",
+            "updated":  last[2] if len(last) > 2 else "0",
+            "added":    last[3] if len(last) > 3 else "0",
+            "catalog":  last[4] if len(last) > 4 else "0",
+        }
+    except Exception:
+        return {}

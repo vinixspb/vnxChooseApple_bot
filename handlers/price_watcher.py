@@ -1,14 +1,18 @@
 import logging
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from aiogram import Router, types, F
 from aiogram.filters import Filter
 
 from services.price_parser import parse_price_list, looks_like_price_list, apply_markup
-from services.sheets_writer import sync_price_list
+from services.sheets_writer import sync_price_list, write_sync_log
 from services.price_publisher import publish_price
 import services.data_store as store
 from services.sheets_manager import get_data_from_sheet, get_settings
+
+_MSK = ZoneInfo("Europe/Moscow")
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -62,10 +66,29 @@ async def _process_price_message(message: types.Message) -> None:
         store.SETTINGS = get_settings()
         logger.info("price_watcher: каталог перезагружен")
 
-    # 3. Публикуем в канал @vnxSHOPprice
+    # 3. Сохраняем статус синхронизации
+    now_msk = datetime.now(_MSK)
+    store.LAST_SYNC = {
+        "time":         now_msk,
+        "time_str":     now_msk.strftime("%d.%m.%Y %H:%M"),
+        "source":       source,
+        "updated":      updated,
+        "added":        added,
+        "catalog_size": len(store.CATALOG),
+        "ok":           ok,
+    }
+    write_sync_log(
+        timestamp=now_msk.strftime("%d.%m.%Y %H:%M:%S"),
+        source=source,
+        updated=updated,
+        added=added,
+        catalog_size=len(store.CATALOG),
+    )
+
+    # 4. Публикуем в канал @vnxSHOPprice
     await publish_price(message.bot, items, source)
 
-    # 4. Уведомляем владельца
+    # 5. Уведомляем владельца
     if OWNER_ID:
         preview = "\n".join(
             f"• {i['title']} — {i['price']} ₽" for i in items[:12]

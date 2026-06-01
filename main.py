@@ -21,9 +21,10 @@ from handlers.catalog import load_all
 
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="🏠 Главное меню"),
-        BotCommand(command="reset", description="🔄 Перезагрузить каталог"),
-        BotCommand(command="ai",    description="🤖 Помочь с выбором (AI)"),
+        BotCommand(command="start",  description="🏠 Главное меню"),
+        BotCommand(command="reset",  description="🔄 Перезагрузить каталог"),
+        BotCommand(command="ai",     description="🤖 Помочь с выбором (AI)"),
+        BotCommand(command="status", description="📊 Статус синхронизации"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())

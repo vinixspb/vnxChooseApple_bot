@@ -41,6 +41,59 @@ async def cmd_reset(message: types.Message, state: FSMContext):
     await load_all()
     await message.answer(MSG["reload_done"], reply_markup=get_main_menu())
 
+
+@router.message(Command("status"))
+async def cmd_status(message: types.Message):
+    if str(message.from_user.id) != MANAGER_ID:
+        return
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from services.sheets_writer import get_last_sync_log
+
+    _MSK = ZoneInfo("Europe/Moscow")
+    now  = datetime.now(_MSK)
+
+    # Аптайм бота
+    delta    = now - store.START_TIME
+    hours    = int(delta.total_seconds() // 3600)
+    minutes  = int((delta.total_seconds() % 3600) // 60)
+    uptime   = f"{hours}ч {minutes}мин" if hours else f"{minutes}мин"
+
+    catalog_size = len(store.CATALOG)
+
+    # Последняя синхронизация: сначала из памяти, потом из SyncLog
+    ls = store.LAST_SYNC
+    if ls:
+        sync_block = (
+            f"🕐 <b>Последняя синхронизация:</b> {ls['time_str']} МСК\n"
+            f"📦 Источник: <i>{ls['source']}</i>\n"
+            f"🔄 Обновлено: {ls['updated']} | Добавлено: {ls['added']}\n"
+            f"{'✅ Записано в таблицу' if ls['ok'] else '⚠️ Ошибка записи в таблицу'}"
+        )
+        from_sheet = ""
+    else:
+        history = get_last_sync_log()
+        if history:
+            sync_block = (
+                f"🕐 <b>Последняя синхронизация (до перезапуска):</b>\n"
+                f"   {history['time_str']} МСК\n"
+                f"📦 Источник: <i>{history['source']}</i>\n"
+                f"🔄 Обновлено: {history['updated']} | Добавлено: {history['added']}"
+            )
+            from_sheet = "\n<i>(данные из SyncLog — бот был перезапущен)</i>"
+        else:
+            sync_block = "⚠️ Синхронизаций ещё не было"
+            from_sheet = ""
+
+    text = (
+        f"<b>📊 Статус vnxSHOP</b>\n\n"
+        f"🤖 Бот работает: <b>{uptime}</b>\n"
+        f"📋 Позиций в каталоге: <b>{catalog_size}</b>\n\n"
+        f"{sync_block}{from_sheet}"
+    )
+    await message.answer(text, parse_mode="HTML")
+
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, command: CommandObject, state: FSMContext):
     await state.clear()
