@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from aiogram import Router, types, F
+from aiogram import Router, types, F, Bot
 from aiogram.filters import Filter
 
 from services.price_parser import parse_price_list, looks_like_price_list, apply_markup
@@ -17,7 +17,27 @@ _MSK = ZoneInfo("Europe/Moscow")
 logger = logging.getLogger(__name__)
 router = Router()
 
-OWNER_ID = os.getenv("MANAGER_ID")
+OWNER_ID            = os.getenv("MANAGER_ID")
+_SECRETARY_TOKEN    = os.getenv("SECRETARY_BOT_TOKEN")
+
+
+async def _notify_owner(bot: Bot, text: str) -> None:
+    """
+    Отправляет уведомление владельцу.
+    Если задан SECRETARY_BOT_TOKEN — отправляет через бота-секретаря,
+    чтобы сообщение появилось в чате с vnxSECRETARY.
+    Иначе — через текущего бота напрямую.
+    """
+    if not OWNER_ID:
+        return
+    if _SECRETARY_TOKEN:
+        sec_bot = Bot(token=_SECRETARY_TOKEN)
+        try:
+            await sec_bot.send_message(OWNER_ID, text, parse_mode="HTML")
+        finally:
+            await sec_bot.session.close()
+    else:
+        await bot.send_message(OWNER_ID, text, parse_mode="HTML")
 
 
 def _get_supplier_ids() -> set[str]:
@@ -88,30 +108,24 @@ async def _process_price_message(message: types.Message) -> None:
     # 4. Публикуем в канал @vnxSHOPprice
     await publish_price(message.bot, items, source)
 
-    # 5. Уведомляем владельца
-    if OWNER_ID:
-        preview = "\n".join(
-            f"• {i['title']} — {i['price']} ₽" for i in items[:12]
-        )
-        if len(items) > 12:
-            preview += f"\n… и ещё {len(items) - 12} позиций"
+    # 5. Уведомляем владельца (через vnxSECRETARY если задан SECRETARY_BOT_TOKEN)
+    preview = "\n".join(f"• {i['title']} — {i['price']} ₽" for i in items[:12])
+    if len(items) > 12:
+        preview += f"\n… и ещё {len(items) - 12} позиций"
 
-        if ok:
-            status = (
-                f"✅ <b>Каталог обновлён</b>\n"
-                f"   Обновлено цен: {updated} | Добавлено: {added}"
-            )
-        else:
-            status = "⚠️ Прайс получен, запись в Sheets не удалась. Проверь логи."
+    status = (
+        f"✅ <b>Каталог обновлён</b>\n   Обновлено цен: {updated} | Добавлено: {added}"
+        if ok else
+        "⚠️ Прайс получен, запись в Sheets не удалась. Проверь логи."
+    )
 
-        await message.bot.send_message(
-            OWNER_ID,
-            f"📥 <b>Новый прайс от поставщика</b>\n"
-            f"Источник: <i>{source}</i>\n"
-            f"Позиций: <b>{len(items)}</b>\n\n"
-            f"{preview}\n\n{status}",
-            parse_mode="HTML",
-        )
+    await _notify_owner(
+        message.bot,
+        f"📥 <b>Новый прайс от поставщика</b>\n"
+        f"Источник: <i>{source}</i>\n"
+        f"Позиций: <b>{len(items)}</b>\n\n"
+        f"{preview}\n\n{status}",
+    )
 
 
 # ── Каналы: новые посты ──────────────────────────────────────────────────────
