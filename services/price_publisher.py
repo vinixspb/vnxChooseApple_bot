@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from collections import defaultdict
 from datetime import datetime
 from typing import List, Dict
@@ -38,25 +39,35 @@ def _fmt_sim(sim: str) -> str:
     return mapping.get(sim.lower().replace(" ", ""), sim)
 
 
+def _memory_gb(mem: str) -> int:
+    """Convert memory string to GB integer for sorting: 256GB→256, 1TB→1024."""
+    m = re.match(r"^(\d+)(GB|TB)?$", str(mem).strip().upper())
+    if not m:
+        return 0
+    n = int(m.group(1))
+    return n * 1024 if (m.group(2) or "GB") == "TB" else n
+
+
 def format_price_message(items: List[Dict], source: str = "") -> str:
     """Форматирует прайс в компактный вид с группировкой по модели."""
+    if not items:
+        return ""
+
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
 
     groups: dict[str, List[Dict]] = defaultdict(list)
     for item in items:
         groups[item.get("item_group_id", "Другое")].append(item)
 
-    lines = [f"🍏 <b>Актуальный прайс — {date_str}</b>"]
-    if source:
-        lines.append(f"📦 Источник: <i>{source}</i>")
-    lines.append("")
+    lines = [f"🍏 <b>Актуальный прайс — {date_str}</b>", ""]
 
     for group_name, group_items in groups.items():
         lines.append(f"📱 <b>{group_name}</b>")
 
+        # Сортируем: память по возрастанию (числово), затем цвет
         sorted_items = sorted(
             group_items,
-            key=lambda x: (x.get("memory", ""), x.get("color", "")),
+            key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
         )
 
         block_lines = []
@@ -74,8 +85,7 @@ def format_price_message(items: List[Dict], source: str = "") -> str:
         lines.append(f"<blockquote expandable>{block}</blockquote>")
         lines.append("")
 
-    lines.append("🔄 Обновляется автоматически")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()
 
 
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
@@ -86,9 +96,12 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     if not items:
         return False
 
-    with_sound = _notify_with_sound()
-    text = format_price_message(items, source)
+    text = format_price_message(items)
+    if not text:
+        logger.info("price_publisher: нет Apple-позиций для публикации")
+        return False
 
+    with_sound = _notify_with_sound()
     try:
         await bot.send_message(
             PRICE_CHANNEL_ID,

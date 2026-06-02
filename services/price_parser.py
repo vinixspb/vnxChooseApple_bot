@@ -12,6 +12,45 @@ _EMOJI_RE = re.compile(
     re.UNICODE,
 )
 
+# ── Brand detection ───────────────────────────────────────────────────────────
+# Known Apple device prefixes / shorthand patterns
+_APPLE_MODEL_RE = re.compile(
+    r"^("
+    r"iPad|iPhone|MacBook|Mac\s|Mac$|iMac|AirPods|HomePod|Beats|"
+    r"Mini\b|"           # iPad Mini shorthand
+    r"Air\b|"            # iPad Air / iPhone 17 Air shorthand
+    r"Pro\s+M\d|"        # iPad Pro M4/M5
+    r"Pro\s+Max|"        # iPhone Pro Max shorthand
+    r"1[5-9](?:\s|$)|"  # iPhone 15, 16, 17, 18, 19
+    r"2\d(?:\s|$)"       # iPhone 20+
+    r")", re.IGNORECASE
+)
+
+# Known non-Apple brand patterns (Samsung, etc.)
+_SAMSUNG_RE = re.compile(
+    r"^("
+    r"Samsung\b|Galaxy\b|"
+    r"S\d{1,2}\b|"       # Galaxy S10, S24, S25, S26
+    r"A\d{2}\b|"         # Galaxy A16, A56
+    r"M\d{2}\b|"         # Galaxy M55, M56  (NOT M4/M5 Apple chip: requires 2 digits)
+    r"Z\s+(?:Flip|Fold)" # Galaxy Z Flip6, Z Fold
+    r")", re.IGNORECASE
+)
+
+
+def _detect_brand(model_part: str) -> str:
+    """
+    Returns 'Apple', 'Samsung', or 'Unknown'.
+    Apple whitelist-first: if it looks like an Apple device, it's Apple.
+    Then Samsung patterns. Everything else is Unknown and gets skipped.
+    """
+    mp = model_part.strip()
+    if _APPLE_MODEL_RE.match(mp):
+        return "Apple"
+    if _SAMSUNG_RE.match(mp):
+        return "Samsung"
+    return "Unknown"
+
 
 def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
@@ -183,6 +222,13 @@ def parse_price_list(text: str) -> List[Dict]:
         memory     = _parse_memory(mem_match.group(1))
         model_part = content[: mem_match.start()].strip(" ,")
         rest       = content[mem_match.end() :].strip()
+
+        # ── Brand filter: skip non-Apple items immediately ────────────────────
+        # Strip WiFi/LTE temporarily to check the actual model name
+        _model_clean = re.sub(r"\b(Wi[-\s]?Fi|WiFi|LTE)\b", "", model_part,
+                               flags=re.IGNORECASE).strip(" ,/")
+        if _detect_brand(_model_clean) != "Apple":
+            continue
 
         # ── Detect WiFi / LTE (for tablets) ──────────────────────────────────
         # Check model_part first (e.g., "Pro M4 13 2024 Wi-Fi")
