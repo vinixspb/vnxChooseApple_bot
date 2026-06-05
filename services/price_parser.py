@@ -181,9 +181,14 @@ def parse_price_list(text: str) -> List[Dict]:
 
         # ── Accessories ──────────────────────────────────────────────────────
         if re.search(
-            r"Чехол|Case|AirTag|кабель|Cable|Зарядк|Стекло|Glass|Защитн|Tempered|Screen",
+            r"Чехол|Case|AirTag|кабель|Cable|Зарядк|Стекло|Glass|Защитн|Tempered|Screen"
+            r"|AirPods|AirPod|Apple Watch|HomePod|Beats",
             content, re.IGNORECASE,
         ):
+            # Skip obvious non-Apple accessories (DJI, Sony, etc.)
+            if re.search(r"\bDJI\b|\bSony\b|\bSamsung\b|\bXiaomi\b|\bHuawei\b|\bAnker\b|\bBaseus\b",
+                          content, re.IGNORECASE):
+                continue
             model_name = content
             color = "-"
             if " - " in model_name:

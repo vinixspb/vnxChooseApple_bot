@@ -8,14 +8,50 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 
+from services.channel_manager import delete_old_price_messages, save_message_ids
+
 logger = logging.getLogger(__name__)
 
 PRICE_CHANNEL_ID = os.getenv("PRICE_CHANNEL_ID")
 _MSK = ZoneInfo("Europe/Moscow")
 
+# ── Category order: first = least visible, last = most visible (at bottom) ───
+_CATEGORY_ORDER = ["other", "beats", "watch", "airpods", "ipad", "mac", "iphone"]
+
+_CATEGORY_EMOJI = {
+    "iphone":  "📱",
+    "ipad":    "🖥",
+    "mac":     "💻",
+    "airpods": "🎧",
+    "watch":   "⌚",
+    "beats":   "🎵",
+    "other":   "📦",
+}
+_CATEGORY_TITLE = {
+    "iphone":  "iPhone",
+    "ipad":    "iPad",
+    "mac":     "MacBook & Mac",
+    "airpods": "AirPods",
+    "watch":   "Apple Watch",
+    "beats":   "Beats",
+    "other":   "Аксессуары",
+}
+
+
+def _get_category(item: Dict) -> str:
+    text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
+    if "iphone" in text:                             return "iphone"
+    if "airpods" in text or "airpod" in text:        return "airpods"
+    if "apple watch" in text or " watch " in text:   return "watch"
+    if "ipad" in text:                               return "ipad"
+    if "macbook" in text or "mac " in text or "mac neo" in text:
+                                                     return "mac"
+    if "beats" in text:                              return "beats"
+    return "other"
+
 
 def _notify_with_sound() -> bool:
-    """Звук только с 11:00 до 13:00 по Москве. Всё остальное время — тихо."""
+    """Sound only 11:00–13:00 MSK."""
     hour = datetime.now(_MSK).hour
     return 11 <= hour < 13
 
@@ -40,7 +76,7 @@ def _fmt_sim(sim: str) -> str:
 
 
 def _memory_gb(mem: str) -> int:
-    """Convert memory string to GB integer for sorting: 256GB→256, 1TB→1024."""
+    """Numeric sort key: 256GB→256, 1TB→1024."""
     m = re.match(r"^(\d+)(GB|TB)?$", str(mem).strip().upper())
     if not m:
         return 0
@@ -48,70 +84,76 @@ def _memory_gb(mem: str) -> int:
     return n * 1024 if (m.group(2) or "GB") == "TB" else n
 
 
-def format_price_message(items: List[Dict], source: str = "") -> str:
-    """Форматирует прайс в компактный вид с группировкой по модели."""
-    if not items:
-        return ""
-
+def _format_category_message(category: str, items: List[Dict]) -> str:
+    emoji    = _CATEGORY_EMOJI.get(category, "📦")
+    title    = _CATEGORY_TITLE.get(category, "Прайс")
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
 
-    groups: dict[str, List[Dict]] = defaultdict(list)
+    groups: Dict[str, List[Dict]] = defaultdict(list)
     for item in items:
         groups[item.get("item_group_id", "Другое")].append(item)
 
-    lines = [f"🍏 <b>Актуальный прайс — {date_str}</b>", ""]
+    lines = [f"{emoji} <b>{title} — {date_str}</b>", ""]
 
-    for group_name, group_items in groups.items():
-        lines.append(f"📱 <b>{group_name}</b>")
-
-        # Сортируем: память по возрастанию (числово), затем цвет
+    for group_name in sorted(groups):
         sorted_items = sorted(
-            group_items,
+            groups[group_name],
             key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
         )
-
         block_lines = []
         for item in sorted_items:
             mem   = item.get("memory", "-")
             color = item.get("color", "-")
             sim   = _fmt_sim(item.get("sim", "-"))
             price = _fmt_price(item.get("price", "0"))
-
             parts = [p for p in [mem, color, sim] if p and p != "-"]
             spec  = " | ".join(parts) if parts else "—"
             block_lines.append(f"└ {spec} — {price} ₽")
 
-        block = "\n".join(block_lines)
-        lines.append(f"<blockquote expandable>{block}</blockquote>")
+        lines.append(f"<b>{group_name}</b>")
+        lines.append(f"<blockquote expandable>{''.join(chr(10).join(block_lines))}</blockquote>")
         lines.append("")
 
     return "\n".join(lines).rstrip()
 
 
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
-    """Публикует прайс в канал. 11:00–13:00 МСК — со звуком, остальное — тихо."""
-    if not PRICE_CHANNEL_ID:
-        logger.warning("PRICE_CHANNEL_ID не задан — публикация пропущена")
-        return False
-    if not items:
+    """
+    Publishes items grouped by category in fixed order (iPhone last = most visible).
+    Deletes yesterday's messages first. Sound only on iPhone message 11–13 MSK.
+    """
+    if not PRICE_CHANNEL_ID or not items:
         return False
 
-    text = format_price_message(items)
-    if not text:
-        logger.info("price_publisher: нет Apple-позиций для публикации")
-        return False
+    by_category: Dict[str, List[Dict]] = defaultdict(list)
+    for item in items:
+        by_category[_get_category(item)].append(item)
+
+    await delete_old_price_messages(bot, PRICE_CHANNEL_ID)
 
     with_sound = _notify_with_sound()
-    try:
-        await bot.send_message(
-            PRICE_CHANNEL_ID,
-            text,
-            parse_mode="HTML",
-            disable_notification=not with_sound,
-        )
-        mode = "со звуком" if with_sound else "тихо"
-        logger.info(f"price_publisher: {len(items)} позиций → {PRICE_CHANNEL_ID} ({mode})")
+    new_ids: List[int] = []
+
+    for cat in _CATEGORY_ORDER:
+        cat_items = by_category.get(cat, [])
+        if not cat_items:
+            continue
+        text = _format_category_message(cat, cat_items)
+        if not text:
+            continue
+        try:
+            msg = await bot.send_message(
+                PRICE_CHANNEL_ID,
+                text,
+                parse_mode="HTML",
+                disable_notification=not (with_sound and cat == "iphone"),
+            )
+            new_ids.append(msg.message_id)
+        except Exception as e:
+            logger.error(f"publish_price [{cat}]: {e}")
+
+    if new_ids:
+        save_message_ids(new_ids)
+        logger.info(f"price_publisher: {len(new_ids)} сообщений, {len(items)} позиций")
         return True
-    except Exception as e:
-        logger.error(f"price_publisher error: {e}")
-        return False
+    return False

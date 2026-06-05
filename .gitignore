@@ -2,3 +2,4 @@ config.py
 __pycache__
 venv/
 .env
+data/price_msg_ids.json
