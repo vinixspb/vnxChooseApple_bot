@@ -13,7 +13,7 @@ from services.channel_manager import delete_old_price_messages, save_message_ids
 logger = logging.getLogger(__name__)
 
 PRICE_CHANNEL_ID = os.getenv("PRICE_CHANNEL_ID")
-_MSK = ZoneInfo("Europe/Moscow")
+_MSK = ZoneInfo("Europe/Moscow")  # used in _format_category_message for date
 
 # ── Category order: first = least visible, last = most visible (at bottom) ───
 _CATEGORY_ORDER = ["other", "beats", "watch", "airpods", "ipad", "mac", "iphone"]
@@ -48,12 +48,6 @@ def _get_category(item: Dict) -> str:
                                                      return "mac"
     if "beats" in text:                              return "beats"
     return "other"
-
-
-def _notify_with_sound() -> bool:
-    """Sound only 11:00–13:00 MSK."""
-    hour = datetime.now(_MSK).hour
-    return 11 <= hour < 13
 
 
 def _fmt_price(price: str | int) -> str:
@@ -120,7 +114,7 @@ def _format_category_message(category: str, items: List[Dict]) -> str:
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     """
     Publishes items grouped by category in fixed order (iPhone last = most visible).
-    Deletes yesterday's messages first. Sound only on iPhone message 11–13 MSK.
+    Deletes old messages first. All messages sent silently (disable_notification=True).
     """
     if not PRICE_CHANNEL_ID or not items:
         return False
@@ -131,7 +125,6 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
 
     await delete_old_price_messages(bot, PRICE_CHANNEL_ID)
 
-    with_sound = _notify_with_sound()
     new_ids: List[int] = []
 
     for cat in _CATEGORY_ORDER:
@@ -146,7 +139,7 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
                 PRICE_CHANNEL_ID,
                 text,
                 parse_mode="HTML",
-                disable_notification=not (with_sound and cat == "iphone"),
+                disable_notification=True,
             )
             new_ids.append(msg.message_id)
         except Exception as e:
