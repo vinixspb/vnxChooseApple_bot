@@ -18,23 +18,14 @@ _MSK = ZoneInfo("Europe/Moscow")  # used in _format_category_message for date
 # ── Category order: first = least visible, last = most visible (at bottom) ───
 _CATEGORY_ORDER = ["other", "beats", "watch", "airpods", "ipad", "mac", "iphone"]
 
-_CATEGORY_EMOJI = {
-    "iphone":  "📱",
-    "ipad":    "🖥",
-    "mac":     "💻",
-    "airpods": "🎧",
-    "watch":   "⌚",
-    "beats":   "🎵",
-    "other":   "📦",
-}
-_CATEGORY_TITLE = {
-    "iphone":  "iPhone",
-    "ipad":    "iPad",
-    "mac":     "MacBook & Mac",
-    "airpods": "AirPods",
-    "watch":   "Apple Watch",
-    "beats":   "Beats",
-    "other":   "Аксессуары",
+# Categories with memory/color/sim variants → grouped блоками с <blockquote expandable>
+_GROUPED_CATEGORIES = {"iphone", "ipad", "mac"}
+
+# Emoji prefix for group headers in grouped categories
+_GROUP_EMOJI = {
+    "iphone": "📱",
+    "ipad":   "🖥",
+    "mac":    "💻",
 }
 
 
@@ -78,35 +69,68 @@ def _memory_gb(mem: str) -> int:
     return n * 1024 if (m.group(2) or "GB") == "TB" else n
 
 
+def _item_emoji(item: Dict) -> str:
+    """Emoji per accessory/item type for simple-list categories."""
+    text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
+    if "airtag" in text:
+        return "🔘"
+    if re.search(r"чехол|case", text):
+        return "🛡"
+    if re.search(r"кабель|cable|зарядк|адаптер|charg", text):
+        return "🔌"
+    if re.search(r"стекло|glass|защитн|tempered|screen", text):
+        return "💎"
+    if "homepod" in text:
+        return "🔊"
+    if "airpods" in text or "airpod" in text:
+        return "🎧"
+    if "apple watch" in text or "watch" in text:
+        return "⌚"
+    if "beats" in text:
+        return "🎵"
+    return "🍎"
+
+
 def _format_category_message(category: str, items: List[Dict]) -> str:
-    emoji    = _CATEGORY_EMOJI.get(category, "📦")
-    title    = _CATEGORY_TITLE.get(category, "Прайс")
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+    lines = [f"🍏 <b>Актуальный прайс — {date_str}</b>", ""]
 
-    groups: Dict[str, List[Dict]] = defaultdict(list)
-    for item in items:
-        groups[item.get("item_group_id", "Другое")].append(item)
+    if category in _GROUPED_CATEGORIES:
+        group_emoji = _GROUP_EMOJI.get(category, "")
 
-    lines = [f"{emoji} <b>{title} — {date_str}</b>", ""]
+        groups: Dict[str, List[Dict]] = defaultdict(list)
+        for item in items:
+            groups[item.get("item_group_id", "Другое")].append(item)
 
-    for group_name in sorted(groups):
+        for group_name in sorted(groups):
+            sorted_items = sorted(
+                groups[group_name],
+                key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
+            )
+            block_lines = []
+            for item in sorted_items:
+                mem   = item.get("memory", "-")
+                color = item.get("color", "-")
+                sim   = _fmt_sim(item.get("sim", "-"))
+                price = _fmt_price(item.get("price", "0"))
+                parts = [p for p in [mem, color, sim] if p and p != "-"]
+                spec  = " | ".join(parts) if parts else "—"
+                block_lines.append(f"└ {spec} — {price} ₽")
+
+            lines.append(f"{group_emoji} <b>{group_name}</b>")
+            lines.append(f"<blockquote expandable>{chr(10).join(block_lines)}</blockquote>")
+            lines.append("")
+    else:
+        # Simple flat list — accessories, AirPods, Watch, Beats: emoji + name — price
         sorted_items = sorted(
-            groups[group_name],
-            key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
+            items,
+            key=lambda x: (x.get("item_group_id", ""), _memory_gb(x.get("memory", "")), x.get("color", "")),
         )
-        block_lines = []
         for item in sorted_items:
-            mem   = item.get("memory", "-")
-            color = item.get("color", "-")
-            sim   = _fmt_sim(item.get("sim", "-"))
+            emoji = _item_emoji(item)
+            name  = item.get("title") or item.get("item_group_id", "")
             price = _fmt_price(item.get("price", "0"))
-            parts = [p for p in [mem, color, sim] if p and p != "-"]
-            spec  = " | ".join(parts) if parts else "—"
-            block_lines.append(f"└ {spec} — {price} ₽")
-
-        lines.append(f"<b>{group_name}</b>")
-        lines.append(f"<blockquote expandable>{''.join(chr(10).join(block_lines))}</blockquote>")
-        lines.append("")
+            lines.append(f"{emoji} {name} — {price} ₽")
 
     return "\n".join(lines).rstrip()
 
