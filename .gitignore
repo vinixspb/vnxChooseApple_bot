@@ -3,3 +3,4 @@ __pycache__
 venv/
 .env
 data/price_msg_ids.json
+data/publish_now.flag

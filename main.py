@@ -59,6 +59,7 @@ async def main():
 
     await set_bot_commands(bot)
     await load_all()
+    asyncio.create_task(price_watcher.watch_manual_publish(bot))
     await dp.start_polling(bot)
 
 

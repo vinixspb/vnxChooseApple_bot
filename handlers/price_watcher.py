@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Router, types, F, Bot
@@ -23,6 +24,13 @@ _SECRETARY_TOKEN = os.getenv("SECRETARY_BOT_TOKEN")
 
 # Delay before publishing to channel (accumulates updates from multiple messages)
 _PUBLISH_DELAY = int(os.getenv("PUBLISH_DELAY_MINUTES", "30")) * 60
+
+# Flag file: vnxSECRETARY creates it on "Ручная публикация прайса" → publish now
+_MANUAL_PUBLISH_FLAG = Path(os.getenv(
+    "MANUAL_PUBLISH_FLAG",
+    str(Path(__file__).resolve().parent.parent / "data" / "publish_now.flag"),
+))
+_MANUAL_PUBLISH_POLL = 5  # seconds
 
 
 def _get_supplier_ids() -> set[str]:
@@ -49,18 +57,14 @@ async def _notify_owner(bot: Bot, text: str) -> None:
         await bot.send_message(OWNER_ID, text, parse_mode="HTML")
 
 
-async def _delayed_publish(bot: Bot) -> None:
-    """Waits _PUBLISH_DELAY seconds, then publishes all pending items in category order."""
-    try:
-        await asyncio.sleep(_PUBLISH_DELAY)
-    except asyncio.CancelledError:
-        return
-
+async def _publish_pending(bot: Bot, manual: bool = False) -> None:
+    """Publishes all accumulated items now, in category order, and notifies owner."""
     items = list(store.PENDING_PUBLISH)
     store.PENDING_PUBLISH.clear()
-    store.PUBLISH_TASK = None
 
     if not items:
+        if manual:
+            await _notify_owner(bot, "ℹ️ Нет накопленных позиций для публикации.")
         return
 
     ok = await publish_price(bot, items)
@@ -75,12 +79,48 @@ async def _delayed_publish(bot: Bot) -> None:
             elif "watch" in g:      cats.add("⌚ Watch")
             else:                   cats.add("📦 Аксессуары")
 
+        prefix = "📢 <b>Прайс опубликован в канал (вручную)</b>\n" if manual else "📢 <b>Прайс опубликован в канал</b>\n"
         await _notify_owner(
             bot,
-            f"📢 <b>Прайс опубликован в канал</b>\n"
+            f"{prefix}"
             f"{' | '.join(sorted(cats))}\n"
             f"Позиций: {len(items)}",
         )
+
+
+async def _cancel_publish_task() -> None:
+    if store.PUBLISH_TASK and not store.PUBLISH_TASK.done():
+        store.PUBLISH_TASK.cancel()
+        await asyncio.gather(store.PUBLISH_TASK, return_exceptions=True)
+    store.PUBLISH_TASK = None
+
+
+async def _delayed_publish(bot: Bot) -> None:
+    """Waits _PUBLISH_DELAY seconds, then publishes all pending items in category order."""
+    try:
+        await asyncio.sleep(_PUBLISH_DELAY)
+    except asyncio.CancelledError:
+        return
+
+    store.PUBLISH_TASK = None
+    await _publish_pending(bot)
+
+
+async def watch_manual_publish(bot: Bot) -> None:
+    """
+    Polls for a flag file created by vnxSECRETARY's "Ручная публикация прайса"
+    button. On detection, cancels the debounce timer and publishes immediately.
+    """
+    while True:
+        try:
+            if _MANUAL_PUBLISH_FLAG.exists():
+                _MANUAL_PUBLISH_FLAG.unlink(missing_ok=True)
+                logger.info("price_watcher: ручная публикация по команде vnxSECRETARY")
+                await _cancel_publish_task()
+                await _publish_pending(bot, manual=True)
+        except Exception as e:
+            logger.error(f"watch_manual_publish: {e}")
+        await asyncio.sleep(_MANUAL_PUBLISH_POLL)
 
 
 async def _process_price_message(message: types.Message) -> None:
@@ -134,9 +174,7 @@ async def _process_price_message(message: types.Message) -> None:
     store.PENDING_PUBLISH = list(existing.values())
 
     # 5. Debounce: cancel existing timer, restart 30-min countdown
-    if store.PUBLISH_TASK and not store.PUBLISH_TASK.done():
-        store.PUBLISH_TASK.cancel()
-        await asyncio.gather(store.PUBLISH_TASK, return_exceptions=True)
+    await _cancel_publish_task()
     store.PUBLISH_TASK = asyncio.create_task(_delayed_publish(message.bot))
 
     # 6. Brief notification to owner
