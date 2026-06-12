@@ -13,6 +13,15 @@ GROUP_REPLY_TEXT = (
     "<i>P.S. Я разработан лично Андреем, поэтому вы можете быть абсолютно уверены в безопасности и конфиденциальности нашей переписки!</i> 🔒"
 )
 
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.new_chat_members | F.left_chat_member)
+async def cleanup_member_events(message: types.Message):
+    """Удаляет служебные сообщения о входе/выходе участников — чистая лента."""
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"cleanup_member_events: не удалось удалить: {e}")
+
+
 @router.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_group_messages(message: types.Message):
     """
