@@ -91,9 +91,34 @@ def _item_emoji(item: Dict) -> str:
     return "🍎"
 
 
-def _format_category_message(category: str, items: List[Dict]) -> str:
+# Telegram hard limit is 4096 chars (incl. HTML tags) — stay safely under it
+_MAX_MSG_LEN = 3500
+
+
+def _pack_chunks(date_str: str, blocks: List[str], sep: str) -> List[str]:
+    """Packs atomic blocks into messages under _MAX_MSG_LEN, numbering parts if split."""
+    chunks: List[str] = []
+    current: List[str] = []
+    current_len = 0
+    for block in blocks:
+        block_len = len(block) + len(sep)
+        if current and current_len + block_len > _MAX_MSG_LEN:
+            chunks.append(sep.join(current))
+            current, current_len = [], 0
+        current.append(block)
+        current_len += block_len
+    if current:
+        chunks.append(sep.join(current))
+
+    total = len(chunks)
+    return [
+        f"🍏 <b>Актуальный прайс{f' ({i}/{total})' if total > 1 else ''} — {date_str}</b>\n\n{body}"
+        for i, body in enumerate(chunks, start=1)
+    ]
+
+
+def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
-    lines = [f"🍏 <b>Актуальный прайс — {date_str}</b>", ""]
 
     if category in _GROUPED_CATEGORIES:
         group_emoji = _GROUP_EMOJI.get(category, "")
@@ -102,6 +127,7 @@ def _format_category_message(category: str, items: List[Dict]) -> str:
         for item in items:
             groups[item.get("item_group_id", "Другое")].append(item)
 
+        blocks = []
         for group_name in sorted(groups):
             sorted_items = sorted(
                 groups[group_name],
@@ -117,22 +143,24 @@ def _format_category_message(category: str, items: List[Dict]) -> str:
                 spec  = " | ".join(parts) if parts else "—"
                 block_lines.append(f"└ {spec} — {price} ₽")
 
-            lines.append(f"{group_emoji} <b>{group_name}</b>")
-            lines.append(f"<blockquote expandable>{chr(10).join(block_lines)}</blockquote>")
-            lines.append("")
-    else:
-        # Simple flat list — accessories, AirPods, Watch, Beats: emoji + name — price
-        sorted_items = sorted(
-            items,
-            key=lambda x: (x.get("item_group_id", ""), _memory_gb(x.get("memory", "")), x.get("color", "")),
-        )
-        for item in sorted_items:
-            emoji = _item_emoji(item)
-            name  = item.get("title") or item.get("item_group_id", "")
-            price = _fmt_price(item.get("price", "0"))
-            lines.append(f"{emoji} {name} — {price} ₽")
+            blocks.append(
+                f"{group_emoji} <b>{group_name}</b>\n"
+                f"<blockquote expandable>{chr(10).join(block_lines)}</blockquote>"
+            )
+        return _pack_chunks(date_str, blocks, sep="\n\n")
 
-    return "\n".join(lines).rstrip()
+    # Simple flat list — accessories, AirPods, Watch, Beats: emoji + name — price
+    sorted_items = sorted(
+        items,
+        key=lambda x: (x.get("item_group_id", ""), _memory_gb(x.get("memory", "")), x.get("color", "")),
+    )
+    lines = []
+    for item in sorted_items:
+        emoji = _item_emoji(item)
+        name  = item.get("title") or item.get("item_group_id", "")
+        price = _fmt_price(item.get("price", "0"))
+        lines.append(f"{emoji} {name} — {price} ₽")
+    return _pack_chunks(date_str, lines, sep="\n")
 
 
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
@@ -155,19 +183,17 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
         cat_items = by_category.get(cat, [])
         if not cat_items:
             continue
-        text = _format_category_message(cat, cat_items)
-        if not text:
-            continue
-        try:
-            msg = await bot.send_message(
-                PRICE_CHANNEL_ID,
-                text,
-                parse_mode="HTML",
-                disable_notification=True,
-            )
-            new_ids.append(msg.message_id)
-        except Exception as e:
-            logger.error(f"publish_price [{cat}]: {e}")
+        for text in _format_category_messages(cat, cat_items):
+            try:
+                msg = await bot.send_message(
+                    PRICE_CHANNEL_ID,
+                    text,
+                    parse_mode="HTML",
+                    disable_notification=True,
+                )
+                new_ids.append(msg.message_id)
+            except Exception as e:
+                logger.error(f"publish_price [{cat}]: {e}")
 
     if new_ids:
         save_message_ids(new_ids)

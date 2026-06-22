@@ -12,6 +12,6 @@ STAGES   = ["model_group", "size", "memory", "memory_ram", "color", "sim"]
 LAST_SYNC: dict = {}
 START_TIME = datetime.datetime.now(_MSK)
 
-# Accumulated items waiting for delayed publish to @vnxSHOPprice
-PENDING_PUBLISH: list[dict] = []
+# Catalog has unpublished changes — full catalog is republished on next debounce
+CATALOG_DIRTY: bool = False
 PUBLISH_TASK: Optional[asyncio.Task] = None

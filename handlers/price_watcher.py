@@ -57,14 +57,34 @@ async def _notify_owner(bot: Bot, text: str) -> None:
         await bot.send_message(OWNER_ID, text, parse_mode="HTML")
 
 
+def _catalog_items_for_publish() -> list[dict]:
+    """
+    Full current in-stock catalog, mapped for publish_price().
+    Publishing always reflects the live catalog (not just today's delta) —
+    otherwise categories untouched by the latest supplier message would
+    vanish from the channel once old messages get deleted.
+    """
+    items = []
+    for row in store.CATALOG:
+        if str(row.get("availability", "")).strip().lower() != "in stock":
+            continue
+        item = dict(row)
+        item["item_group_id"] = row.get("model_group") or row.get("title", "")
+        items.append(item)
+    return items
+
+
 async def _publish_pending(bot: Bot, manual: bool = False) -> None:
-    """Publishes all accumulated items now, in category order, and notifies owner."""
-    items = list(store.PENDING_PUBLISH)
-    store.PENDING_PUBLISH.clear()
+    """Publishes the full current catalog, in category order, and notifies owner."""
+    if not manual and not store.CATALOG_DIRTY:
+        return
+
+    items = _catalog_items_for_publish()
+    store.CATALOG_DIRTY = False
 
     if not items:
         if manual:
-            await _notify_owner(bot, "ℹ️ Нет накопленных позиций для публикации.")
+            await _notify_owner(bot, "ℹ️ Каталог пуст — нечего публиковать.")
         return
 
     ok = await publish_price(bot, items)
@@ -167,11 +187,8 @@ async def _process_price_message(message: types.Message) -> None:
         catalog_size=len(store.CATALOG),
     )
 
-    # 4. Accumulate items for delayed publish (deduplicate by id, keep latest price)
-    existing = {i["id"]: i for i in store.PENDING_PUBLISH}
-    for item in items:
-        existing[item["id"]] = item
-    store.PENDING_PUBLISH = list(existing.values())
+    # 4. Mark catalog dirty — full live catalog gets republished after debounce
+    store.CATALOG_DIRTY = True
 
     # 5. Debounce: cancel existing timer, restart 30-min countdown
     await _cancel_publish_task()
