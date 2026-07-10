@@ -49,16 +49,59 @@ def _fmt_price(price: str | int) -> str:
         return str(price)
 
 
+_SIM_LABELS: Dict[str, str] = {
+    "esim":      "eSIM",
+    "nano+esim": "Nano + eSIM",
+    "nano+nano": "Nano + Nano",
+    "nanoesim":  "Nano + eSIM",
+    "wifi":      "WiFi",
+    "lte":       "LTE",
+}
+
+_REGION_FLAG: Dict[str, str] = {
+    "international": "🌐",
+    "россия":        "🇷🇺",
+    "европа":        "🇪🇺",
+    "китай":         "🇨🇳",
+    "uk":            "🇬🇧",
+    "сша":           "🇺🇸",
+}
+
+
 def _fmt_sim(sim: str) -> str:
-    mapping = {
-        "esim":      "eSIM",
-        "nano+esim": "Nano + eSIM",
-        "nano+nano": "Nano + Nano",
-        "nanoesim":  "Nano + eSIM",
-        "wifi":      "WiFi",
-        "lte":       "LTE",
-    }
-    return mapping.get(sim.lower().replace(" ", ""), sim)
+    return _SIM_LABELS.get(sim.lower().replace(" ", ""), sim)
+
+
+def _fmt_sim_marked(sim: str) -> str:
+    """Format SIM with visual marker: 📲 digital-only, 💳 physical card."""
+    label = _fmt_sim(sim)
+    if not label or label == "-":
+        return ""
+    s = label.lower()
+    if "nano" in s or "dual" in s or "lte" in s:
+        return f"💳 {label}"
+    if "esim" in s:
+        return f"📲 {label}"
+    if "wifi" in s:
+        return f"📶 {label}"
+    return label
+
+
+def _sim_order(sim: str) -> int:
+    """Sort key within a group: pure eSIM first (cheaper), physical SIM second."""
+    s = sim.lower().replace(" ", "")
+    if not s or s == "-":
+        return 3
+    if "esim" in s and "nano" not in s:
+        return 0   # pure eSIM
+    if "wifi" in s:
+        return 2   # WiFi (iPad) — after physical SIM
+    return 1       # Nano+eSIM, Nano+Nano, Dual SIM, LTE
+
+
+def _fmt_region(region: str) -> str:
+    """Map region label to flag emoji, or return label as-is if unknown."""
+    return _REGION_FLAG.get(region.strip().lower(), region)
 
 
 def _memory_gb(mem: str) -> int:
@@ -169,32 +212,23 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
 
         blocks = []
         for group_name in sorted_groups:
-            # De-duplicate: same (memory, color, sim) spec → keep cheapest.
-            # Prevents "blind twins" when old rows have no SIM field and two
-            # suppliers carry the same configuration at different prices.
-            best: dict[tuple, dict] = {}
-            for it in groups[group_name]:
-                key = (it.get("memory", ""), it.get("color", ""), it.get("sim", ""))
-                try:
-                    candidate_price = int(it.get("price", 0) or 0)
-                    existing_price  = int(best[key].get("price", 0) or 0) if key in best else None
-                except (ValueError, TypeError):
-                    candidate_price, existing_price = 0, None
-                if existing_price is None or candidate_price < existing_price:
-                    best[key] = it
-
             sorted_items = sorted(
-                best.values(),
-                key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
+                groups[group_name],
+                key=lambda x: (
+                    _memory_gb(x.get("memory", "")),
+                    _sim_order(x.get("sim", "")),
+                    x.get("color", ""),
+                ),
             )
             block_lines = []
             for item in sorted_items:
-                mem   = item.get("memory", "-")
-                color = item.get("color", "-")
-                sim   = _fmt_sim(item.get("sim", "-"))
-                price = _fmt_price(item.get("price", "0"))
-                parts = [p for p in [mem, color, sim] if p and p != "-"]
-                spec  = " | ".join(parts) if parts else "—"
+                mem    = item.get("memory", "-")
+                color  = item.get("color", "-")
+                sim    = _fmt_sim_marked(item.get("sim", "-"))
+                region = _fmt_region(item.get("region", "-"))
+                price  = _fmt_price(item.get("price", "0"))
+                parts  = [p for p in [mem, color, sim, region] if p and p != "-"]
+                spec   = " | ".join(parts) if parts else "—"
                 block_lines.append(f"└ {spec} — {price} ₽")
 
             blocks.append(
