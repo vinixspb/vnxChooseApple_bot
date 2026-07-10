@@ -169,8 +169,22 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
 
         blocks = []
         for group_name in sorted_groups:
+            # De-duplicate: same (memory, color, sim) spec → keep cheapest.
+            # Prevents "blind twins" when old rows have no SIM field and two
+            # suppliers carry the same configuration at different prices.
+            best: dict[tuple, dict] = {}
+            for it in groups[group_name]:
+                key = (it.get("memory", ""), it.get("color", ""), it.get("sim", ""))
+                try:
+                    candidate_price = int(it.get("price", 0) or 0)
+                    existing_price  = int(best[key].get("price", 0) or 0) if key in best else None
+                except (ValueError, TypeError):
+                    candidate_price, existing_price = 0, None
+                if existing_price is None or candidate_price < existing_price:
+                    best[key] = it
+
             sorted_items = sorted(
-                groups[group_name],
+                best.values(),
                 key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
             )
             block_lines = []

@@ -66,6 +66,26 @@ def _normalize_group(name: str) -> str:
     return _APPLE_PREFIX_RE.sub("", name).strip()
 
 
+def _infer_sim_from_id(item_id: str) -> str:
+    """
+    Extract SIM type from the deterministic ID for old Sheets rows where
+    the sim field was never populated.
+    ID format: APPLEIPHONE15PRO-256GB-NANOESIM-NATURALTILANIUM
+    """
+    uid = str(item_id).upper().replace("+", "").replace(" ", "")
+    if "NANOESIM" in uid:
+        return "Nano + eSIM"
+    if "NANONANO" in uid:
+        return "Nano + Nano"
+    if "ESIM" in uid:
+        return "eSIM"
+    if "WIFI" in uid:
+        return "WiFi"
+    if "LTE" in uid:
+        return "LTE"
+    return "-"
+
+
 def _catalog_items_for_publish() -> list[dict]:
     """
     Full current in-stock catalog, mapped for publish_price().
@@ -80,6 +100,12 @@ def _catalog_items_for_publish() -> list[dict]:
         item = dict(row)
         raw_group = row.get("model_group") or row.get("title", "")
         item["item_group_id"] = _normalize_group(raw_group)
+
+        # Backfill SIM from ID for old rows with empty sim field
+        sim = str(item.get("sim", "")).strip()
+        if not sim or sim == "-":
+            item["sim"] = _infer_sim_from_id(item.get("id", ""))
+
         items.append(item)
     return items
 
