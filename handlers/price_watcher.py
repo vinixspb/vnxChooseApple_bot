@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,6 +58,14 @@ async def _notify_owner(bot: Bot, text: str) -> None:
         await bot.send_message(OWNER_ID, text, parse_mode="HTML")
 
 
+_APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
+
+
+def _normalize_group(name: str) -> str:
+    """Strip redundant 'Apple ' prefix so 'Apple iPhone 15' == 'iPhone 15'."""
+    return _APPLE_PREFIX_RE.sub("", name).strip()
+
+
 def _catalog_items_for_publish() -> list[dict]:
     """
     Full current in-stock catalog, mapped for publish_price().
@@ -69,7 +78,8 @@ def _catalog_items_for_publish() -> list[dict]:
         if str(row.get("availability", "")).strip().lower() != "in stock":
             continue
         item = dict(row)
-        item["item_group_id"] = row.get("model_group") or row.get("title", "")
+        raw_group = row.get("model_group") or row.get("title", "")
+        item["item_group_id"] = _normalize_group(raw_group)
         items.append(item)
     return items
 

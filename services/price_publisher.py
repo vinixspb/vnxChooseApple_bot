@@ -31,13 +31,14 @@ _GROUP_EMOJI = {
 
 def _get_category(item: Dict) -> str:
     text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
-    if "iphone" in text:                             return "iphone"
-    if "airpods" in text or "airpod" in text:        return "airpods"
-    if "apple watch" in text or " watch " in text:   return "watch"
-    if "ipad" in text:                               return "ipad"
+    if "iphone" in text:                                      return "iphone"
+    if "airpods" in text or "airpod" in text:                 return "airpods"
+    if "apple watch" in text or re.search(r"\baw\b", text):   return "watch"
+    if " watch" in text or "watch " in text:                  return "watch"
+    if "ipad" in text:                                        return "ipad"
     if "macbook" in text or "mac " in text or "mac neo" in text:
-                                                     return "mac"
-    if "beats" in text:                              return "beats"
+                                                              return "mac"
+    if "beats" in text:                                       return "beats"
     return "other"
 
 
@@ -69,22 +70,55 @@ def _memory_gb(mem: str) -> int:
     return n * 1024 if (m.group(2) or "GB") == "TB" else n
 
 
+def _iphone_group_sort_key(group_name: str) -> tuple:
+    """
+    Sort iPhone groups by generation number, then model tier.
+    SE < numbered (12 < 13 < 14 < 15 < 16 < 17 ...)
+    Within generation: Air/e < base < Plus < Pro < Pro Max
+    """
+    name = group_name.lower()
+
+    # Extract generation number (iPhone 15, iPhone 16 Pro, etc.)
+    gen_match = re.search(r"iphone\s+(\d+)", name)
+    gen = int(gen_match.group(1)) if gen_match else 0
+
+    # SE is lowest within a generation (treat SE as gen 0 if no number)
+    if "se" in name and gen == 0:
+        gen = -1  # SE without a number sorts first of all
+
+    # Model tier within generation
+    if "pro max" in name:
+        tier = 4
+    elif "pro" in name:
+        tier = 3
+    elif "plus" in name:
+        tier = 2
+    elif re.search(r"\bair\b|\be\b", name):
+        tier = 0   # Air and 'e' before base
+    else:
+        tier = 1   # base model
+
+    return (gen, tier)
+
+
 def _item_emoji(item: Dict) -> str:
     """Emoji per accessory/item type for simple-list categories."""
     text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
     if "airtag" in text:
         return "🔘"
-    if re.search(r"чехол|case", text):
-        return "🛡"
     if re.search(r"кабель|cable|зарядк|адаптер|charg", text):
         return "🔌"
     if re.search(r"стекло|glass|защитн|tempered|screen", text):
         return "💎"
     if "homepod" in text:
         return "🔊"
+    # чехол/case checked AFTER device-specific accessories but BEFORE device emoji,
+    # so "AirPods Pro Case" and "Watch Case" get 🛡 not 🎧/⌚
+    if re.search(r"чехол|case\b", text):
+        return "🛡"
     if "airpods" in text or "airpod" in text:
         return "🎧"
-    if "apple watch" in text or "watch" in text:
+    if "apple watch" in text or re.search(r"\baw\b|\bwatch\b", text):
         return "⌚"
     if "beats" in text:
         return "🎵"
@@ -127,8 +161,14 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
         for item in items:
             groups[item.get("item_group_id", "Другое")].append(item)
 
+        # iPhone: sort by generation→tier; iPad/Mac: alphabetically
+        if category == "iphone":
+            sorted_groups = sorted(groups, key=_iphone_group_sort_key)
+        else:
+            sorted_groups = sorted(groups)
+
         blocks = []
-        for group_name in sorted(groups):
+        for group_name in sorted_groups:
             sorted_items = sorted(
                 groups[group_name],
                 key=lambda x: (_memory_gb(x.get("memory", "")), x.get("color", "")),
