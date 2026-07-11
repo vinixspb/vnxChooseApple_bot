@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import time
 from typing import List, Dict, Any
 
@@ -22,8 +23,17 @@ _COLUMNS = [
     "shipping_weight", "gtin", "memory", "sim", "region",
 ]
 
+# Meta Commerce Manager requirement: quantity must not be empty when in stock.
+_IN_STOCK_QTY = "10"
+
+# Required by Meta to bypass courier delivery requirement check.
+_PICKUP_NOTICE = (
+    "⚠️ Внимание: Товар доступен только для самовывоза. "
+    "Доставка курьерскими службами не осуществляется."
+)
+
 _DEFAULTS: Dict[str, str] = {
-    "description":                  "",
+    "description":                  _PICKUP_NOTICE,
     "availability":                 "in stock",
     "condition":                    "new",
     "link":                         "https://www.apple.com",
@@ -31,7 +41,7 @@ _DEFAULTS: Dict[str, str] = {
     "brand":                        "Apple",
     "google_product_category":      "Electronics",
     "fb_product_category":          "",
-    "quantity_to_sell_on_facebook": "",
+    "quantity_to_sell_on_facebook": _IN_STOCK_QTY,
     "purchase_price":               "",
     "sale_price_effective_date":    "",
     "gender":                       "",
@@ -45,9 +55,47 @@ _DEFAULTS: Dict[str, str] = {
     "region":                       "",
 }
 
+# Google Drive share link patterns → direct-download URL
+_GDRIVE_FILE_RE = re.compile(
+    r"https?://drive\.google\.com/file/d/([^/?#]+)", re.IGNORECASE
+)
+_GDRIVE_OPEN_RE = re.compile(
+    r"https?://drive\.google\.com/open\?id=([^&]+)", re.IGNORECASE
+)
+
+
+def _fix_image_link(url: str) -> str:
+    """
+    Convert Google Drive share URLs to direct-download format so Meta
+    crawlers can fetch the file (status 200, raw image bytes).
+    Other URLs are returned unchanged.
+    """
+    if not url:
+        return url
+    m = _GDRIVE_FILE_RE.search(url) or _GDRIVE_OPEN_RE.search(url)
+    if m:
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+    return url
+
 
 def _build_row(item: Dict[str, Any], header: List[str]) -> List[str]:
     merged = {**_DEFAULTS, **item}
+
+    # quantity: in stock → _IN_STOCK_QTY, out of stock → 0
+    avail = str(merged.get("availability", "")).strip().lower()
+    if avail == "out of stock":
+        merged["quantity_to_sell_on_facebook"] = "0"
+    elif not merged.get("quantity_to_sell_on_facebook"):
+        merged["quantity_to_sell_on_facebook"] = _IN_STOCK_QTY
+
+    # description: append pickup notice if not already present
+    desc = str(merged.get("description", "")).strip()
+    if _PICKUP_NOTICE not in desc:
+        merged["description"] = (desc + "\n" + _PICKUP_NOTICE).strip() if desc else _PICKUP_NOTICE
+
+    # image_link: convert Drive share URLs to direct-download
+    merged["image_link"] = _fix_image_link(str(merged.get("image_link", "")))
+
     return [str(merged.get(col, "")).strip() for col in header]
 
 
@@ -94,6 +142,7 @@ def sync_price_list(
                 price_col    = header.index("price") + 1
                 avail_col    = header.index("availability") + 1
                 purchase_col = header.index("purchase_price") + 1 if "purchase_price" in header else None
+                qty_col      = header.index("quantity_to_sell_on_facebook") + 1 if "quantity_to_sell_on_facebook" in header else None
             except ValueError as e:
                 logger.error(f"Столбец не найден: {e}")
                 return {"updated": 0, "added": 0}
@@ -112,7 +161,7 @@ def sync_price_list(
                 item_id = item.get("id", "")
                 if item_id in id_to_row:
                     row_num = id_to_row[item_id]
-                    # Обновляем продажную цену, закупочную и наличие
+                    # Обновляем продажную цену, закупочную, наличие и количество
                     batch_updates.append({
                         "range": gu.rowcol_to_a1(row_num, price_col),
                         "values": [[item["price"]]],
@@ -121,6 +170,11 @@ def sync_price_list(
                         "range": gu.rowcol_to_a1(row_num, avail_col),
                         "values": [["in stock"]],
                     })
+                    if qty_col:
+                        batch_updates.append({
+                            "range": gu.rowcol_to_a1(row_num, qty_col),
+                            "values": [[_IN_STOCK_QTY]],
+                        })
                     if purchase_col and item.get("purchase_price"):
                         batch_updates.append({
                             "range": gu.rowcol_to_a1(row_num, purchase_col),

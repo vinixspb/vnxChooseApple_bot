@@ -73,15 +73,15 @@ def _fmt_sim(sim: str) -> str:
 
 
 def _fmt_sim_marked(sim: str) -> str:
-    """Format SIM with visual marker: 📲 digital-only, 💳 physical card."""
+    """Format SIM with visual marker: ☁️ digital-only eSIM, 📎 physical card."""
     label = _fmt_sim(sim)
     if not label or label == "-":
         return ""
     s = label.lower()
     if "nano" in s or "dual" in s or "lte" in s:
-        return f"💳 {label}"
+        return f"📎 {label}"
     if "esim" in s:
-        return f"📲 {label}"
+        return f"☁️ {label}"
     if "wifi" in s:
         return f"📶 {label}"
     return label
