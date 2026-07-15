@@ -43,14 +43,21 @@ _NON_APPLE_RE = re.compile(
     r")", re.IGNORECASE
 )
 
+# Samsung-style RAM/Storage notation: "12/256", "8/128" — never used by Apple.
+# Catches disguised Samsung items like "Apple 9 Pro Fold 12/256".
+_SAMSUNG_RAM_RE = re.compile(r"\b\d{1,2}/\d{1,4}\b")
+
 # "Apple" brand is the default in _DEFAULTS, so non-Apple items often have
 # brand set to "Apple" anyway. We detect by title/item_group_id instead.
+
+_APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
 
 
 def _is_non_apple(row: dict) -> bool:
     """
     Returns True if the row is clearly a non-Apple product.
     Checks title and item_group_id against non-Apple brand patterns.
+    Also detects Samsung items mislabeled as "Apple S24", "Apple Z Flip7", etc.
     """
     brand = str(row.get("brand", "")).strip()
     # Explicit non-Apple brand field
@@ -62,8 +69,21 @@ def _is_non_apple(row: dict) -> bool:
     # Check item_group_id and title
     for field in ("item_group_id", "title"):
         val = str(row.get(field, "")).strip()
-        if val and _NON_APPLE_RE.match(val):
+        if not val:
+            continue
+
+        if _NON_APPLE_RE.match(val):
             return True
+
+        # Also strip "Apple " prefix and re-check.
+        # Catches "Apple S24 8/", "Apple Z Flip7", "Apple M55 8/" etc.
+        val_stripped = _APPLE_PREFIX_RE.sub("", val).strip()
+        if val_stripped != val:
+            if _NON_APPLE_RE.match(val_stripped):
+                return True
+            # Samsung-style RAM/storage notation not used by Apple
+            if _SAMSUNG_RAM_RE.search(val_stripped):
+                return True
 
     return False
 

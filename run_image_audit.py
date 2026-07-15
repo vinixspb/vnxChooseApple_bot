@@ -79,6 +79,41 @@ _r(r"iphone\s*12\b",            _u("iphone-12-black-select"))
 # ── iPhone SE ─────────────────────────────────────────────────────────────────
 _r(r"iphone\s*se",              _u("iphone-se-select-202203"))
 
+# ── iPhone numbered without "iPhone" word ─────────────────────────────────────
+# Suppliers sometimes list as "Apple 16 Pro Max" without the word "iPhone".
+# Most specific (Pro Max) must come before less specific (Pro, base).
+_r(r"\bapple\s+17\s*pro\s*max", _u("iphone-17-pro-max-finish-select-202509"))
+_r(r"\bapple\s+17\s*pro\b",     _u("iphone-17-pro-finish-select-202509"))
+_r(r"\bapple\s+17\s*plus",      _u("iphone-17-plus-finish-select-202509"))
+_r(r"\bapple\s+17\s*air",       _u("iphone-17-air-finish-select-202509"))
+_r(r"\bapple\s+17e\b",          _u("iphone-17-finish-select-202509"))
+_r(r"\bapple\s+17\b",           _u("iphone-17-finish-select-202509"))
+_r(r"\bapple\s+16\s*pro\s*max", _u("iphone-16-pro-max-finish-select-202409-6-9inch-desertitanium"))
+_r(r"\bapple\s+16\s*pro\b",     _u("iphone-16-pro-finish-select-202409-6-3inch-desertitanium"))
+_r(r"\bapple\s+16\s*plus",      _u("iphone-16-plus-finish-select-202409-6-7inch-black"))
+_r(r"\bapple\s+16e\b",          _u("iphone-16e-finish-select-202502-white"))
+_r(r"\bapple\s+16\b",           _u("iphone-16-finish-select-202409-6-1inch-black"))
+_r(r"\bapple\s+15\s*pro\s*max", _u("iphone-15-pro-max-black-titanium-select"))
+_r(r"\bapple\s+15\s*pro\b",     _u("iphone-15-pro-black-titanium-select"))
+_r(r"\bapple\s+15\s*plus",      _u("iphone-15-plus-black-select"))
+_r(r"\bapple\s+15\b",           _u("iphone-15-black-select"))
+_r(r"\bapple\s+14\s*pro\s*max", _u("iphone-14-pro-max-spacenoir-select"))
+_r(r"\bapple\s+14\s*pro\b",     _u("iphone-14-pro-spacenoir-select"))
+_r(r"\bapple\s+14\s*plus",      _u("iphone-14-plus-midnight-select"))
+_r(r"\bapple\s+14\b",           _u("iphone-14-midnight-select"))
+_r(r"\bapple\s+13\s*pro\s*max", _u("iphone-13-pro-max-graphite-select"))
+_r(r"\bapple\s+13\s*pro\b",     _u("iphone-13-pro-graphite-select"))
+_r(r"\bapple\s+13\s*mini",      _u("iphone-13-mini-midnight-select"))
+_r(r"\bapple\s+13\b",           _u("iphone-13-midnight-select"))
+_r(r"\bapple\s+12\s*pro\s*max", _u("iphone-12-pro-max-graphite-select"))
+_r(r"\bapple\s+12\s*pro\b",     _u("iphone-12-pro-graphite-select"))
+_r(r"\bapple\s+12\s*mini",      _u("iphone-12-mini-black-select"))
+_r(r"\bapple\s+12\b",           _u("iphone-12-black-select"))
+_r(r"\bapple\s+11\s*pro\s*max", _u("iphone-13-pro-max-graphite-select"))  # 11 CDN may 404; use 13
+_r(r"\bapple\s+11\s*pro\b",     _u("iphone-13-pro-graphite-select"))
+_r(r"\bapple\s+11\b",           _u("iphone-13-midnight-select"))
+_r(r"\bapple\s+se\b",           _u("iphone-se-select-202203"))
+
 # ── iPad Pro ──────────────────────────────────────────────────────────────────
 _r(r"ipad\s*pro.*(m5|2025)",    _u("ipad-pro-m5-select-202505"))
 _r(r"ipad\s*pro.*(m4|2024)",    _u("ipad-pro-m4-select-202405"))
@@ -142,13 +177,17 @@ _r(r"airpods\s*4",              _u("airpods-4-select-202409"))
 _r(r"airpods",                  _u("airpods-4-select-202409"))
 
 # ── Apple Watch ───────────────────────────────────────────────────────────────
+_r(r"watch\s*ultra\s*3",        _u("watch-ultra2-hero-select-202309"))   # 2025 model → Ultra 2 as closest
 _r(r"watch\s*ultra\s*2",        _u("watch-ultra2-hero-select-202309"))
 _r(r"watch\s*ultra",            _u("watch-ultra2-hero-select-202309"))
+_r(r"watch\s*(s|series)\s*11",  _u("watch-series-10-hero-select-202409")) # 2025 model → S10 as closest
 _r(r"watch\s*(s|series)\s*10",  _u("watch-series-10-hero-select-202409"))
 _r(r"watch\s*(s|series)\s*9",   _u("watch-series-9-hero-select-202309"))
 _r(r"watch\s*(s|series)\s*8",   _u("watch-series-8-hero-select-202209"))
 _r(r"watch\s*se",               _u("watch-se-hero-select-202309"))
+_r(r"\baw\s*ultra\s*3\b",       _u("watch-ultra2-hero-select-202309"))
 _r(r"\baw\s*ultra\s*2",         _u("watch-ultra2-hero-select-202309"))
+_r(r"\baw\s*11\b",              _u("watch-series-10-hero-select-202409"))
 _r(r"\baw\s*10\b",              _u("watch-series-10-hero-select-202409"))
 _r(r"\baw\s*9\b",               _u("watch-series-9-hero-select-202309"))
 _r(r"\baw\s*se\b",              _u("watch-se-hero-select-202309"))
@@ -165,6 +204,28 @@ _r(r"beats",                    _u("beats-studio-pro-black-select"))
 _r(r"airtag",                   _u("airtag-double-select-202104"))
 _r(r"homepod\s*mini",           _u("homepod-mini-select-202110-yellow"))
 _r(r"homepod",                  _u("homepod-2ndgen-select-202302-midnight"))
+
+# ── iPhone cases (product name has no "iPhone" word) ─────────────────────────
+_r(r"air\s+case.*magsafe|magsafe.*air\s+case", _u("iphone-17-air-finish-select-202509"))
+_r(r"pitaka.*17\s*pro\s*max",  _u("iphone-17-pro-max-finish-select-202509"))
+_r(r"pitaka.*17\s*pro\b",      _u("iphone-17-pro-finish-select-202509"))
+_r(r"pitaka.*17\b",            _u("iphone-17-finish-select-202509"))
+_r(r"pitaka.*16\s*pro\s*max",  _u("iphone-16-pro-max-finish-select-202409-6-9inch-desertitanium"))
+_r(r"pitaka.*16\s*pro\b",      _u("iphone-16-pro-finish-select-202409-6-3inch-desertitanium"))
+_r(r"pitaka.*16\b",            _u("iphone-16-finish-select-202409-6-1inch-black"))
+_r(r"pitaka.*15\s*pro\s*max",  _u("iphone-15-pro-max-black-titanium-select"))
+_r(r"pitaka.*15\s*pro\b",      _u("iphone-15-pro-black-titanium-select"))
+_r(r"pitaka",                  _u("iphone-16-finish-select-202409-6-1inch-black"))  # generic Pitaka
+
+# ── Magic Keyboard (iPad accessory) ──────────────────────────────────────────
+_r(r"magic\s*keyboard",        _u("ipad-pro-m4-select-202405"))
+
+# ── Apple Pencil ──────────────────────────────────────────────────────────────
+_r(r"apple\s*pencil\s*pro",    _u("ipad-air-m2-select-202405"))
+_r(r"apple\s*pencil",          _u("ipad-air-m2-select-202405"))
+
+# ── MacBook Neo (2026 MacBook Air successor) ──────────────────────────────────
+_r(r"macbook\s*neo",           _u("mba-m4-select-202503"))
 
 
 def resolve_image(title: str, group_id: str) -> tuple[str, str]:
@@ -223,7 +284,7 @@ def main():
             continue
 
         old_image = cell(image_idx)
-        if old_image:           # already has an image — skip
+        if old_image and old_image != _FALLBACK:  # skip real images; retry fallback rows
             continue
 
         title    = cell(title_idx)
