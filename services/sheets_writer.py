@@ -8,6 +8,7 @@ import gspread
 import gspread.utils as gu
 
 from services.sheets_manager import authorize_gspread
+from services.image_mapper import get_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,14 @@ def _build_row(item: Dict[str, Any], header: List[str]) -> List[str]:
     if _PICKUP_NOTICE not in desc:
         merged["description"] = (desc + "\n" + _PICKUP_NOTICE).strip() if desc else _PICKUP_NOTICE
 
-    # image_link: convert Drive share URLs to direct-download
-    merged["image_link"] = _fix_image_link(str(merged.get("image_link", "")))
+    # image_link: convert Drive share URLs; auto-fill from model mapping if empty
+    image = _fix_image_link(str(merged.get("image_link", "")))
+    if not image:
+        image = get_image_url(
+            str(merged.get("item_group_id", "")),
+            str(merged.get("title", "")),
+        )
+    merged["image_link"] = image
 
     return [str(merged.get(col, "")).strip() for col in header]
 

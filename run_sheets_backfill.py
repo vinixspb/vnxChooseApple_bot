@@ -18,6 +18,7 @@ load_dotenv()
 
 from services.sheets_manager import authorize_gspread
 from services.sheets_writer import _PICKUP_NOTICE, _fix_image_link
+from services.image_mapper import get_image_url
 
 _GDRIVE_ANY_RE = re.compile(r"drive\.google\.com", re.IGNORECASE)
 
@@ -27,7 +28,18 @@ def _needs_desc_update(desc: str) -> bool:
 
 
 def _needs_image_update(url: str) -> bool:
-    return bool(url) and _GDRIVE_ANY_RE.search(url)
+    """Fix Drive URLs OR fill empty image_link from model mapping."""
+    if not url:
+        return True   # empty → mapper will provide a URL
+    return bool(_GDRIVE_ANY_RE.search(url))  # Drive URL → convert
+
+
+def _resolve_image(old_url: str, title: str, item_group_id: str) -> str:
+    if old_url and not _GDRIVE_ANY_RE.search(old_url):
+        return old_url  # already good, no change needed (shouldn't reach here)
+    if _GDRIVE_ANY_RE.search(old_url):
+        return _fix_image_link(old_url)
+    return get_image_url(item_group_id, title)
 
 
 def main():
@@ -84,8 +96,9 @@ def main():
             new_desc = (old_desc + "\n" + _PICKUP_NOTICE).strip() if old_desc.strip() else _PICKUP_NOTICE
             desc_changes.append((i, title, old_desc, new_desc))
 
+        group_id = cell(header.index("item_group_id")) if "item_group_id" in header else ""
         if _needs_image_update(old_image):
-            new_image = _fix_image_link(old_image)
+            new_image = _resolve_image(old_image, title, group_id)
             if new_image != old_image:
                 image_changes.append((i, title, old_image, new_image))
 
@@ -93,17 +106,16 @@ def main():
 
     print(f"\n{'='*64}")
     print(f"  Description — нужно обновить: {len(desc_changes)} строк")
-    print(f"  Image link  — нужно конвертировать: {len(image_changes)} строк")
+    print(f"  Image link  — нужно заполнить/конвертировать: {len(image_changes)} строк")
     print(f"{'='*64}\n")
 
     if desc_changes:
         print(f"── Description (первые 10 из {len(desc_changes)}) ──")
         for sheet_row, title, old, new in desc_changes[:10]:
             print(f"\n  [стр {sheet_row}] {title[:55]}")
-            old_preview = repr(old[:80]) if old else "(пусто)"
-            new_preview = repr(new[:120])
+            old_preview = old if old else "(пусто)"
             print(f"  БЫЛО: {old_preview}")
-            print(f"  БУДЕТ: {new_preview}")
+            print(f"  БУДЕТ: {new}")
         if len(desc_changes) > 10:
             print(f"\n  ... и ещё {len(desc_changes) - 10} строк (все одинаковые)")
 
