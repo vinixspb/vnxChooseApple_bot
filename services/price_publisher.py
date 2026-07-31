@@ -16,7 +16,7 @@ PRICE_CHANNEL_ID = os.getenv("PRICE_CHANNEL_ID")
 _MSK = ZoneInfo("Europe/Moscow")  # used in _format_category_message for date
 
 # ── Category order: first = least visible, last = most visible (at bottom) ───
-_CATEGORY_ORDER = ["other", "beats", "watch", "airpods", "ipad", "mac", "iphone"]
+_CATEGORY_ORDER = ["other", "watch", "airpods", "ipad", "mac", "iphone"]
 
 # Categories with memory/color/sim variants → grouped блоками с <blockquote expandable>
 _GROUPED_CATEGORIES = {"iphone", "ipad", "mac"}
@@ -33,12 +33,12 @@ def _get_category(item: Dict) -> str:
     text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
     if "iphone" in text:                                      return "iphone"
     if "airpods" in text or "airpod" in text:                 return "airpods"
+    if "beats" in text:                                       return "airpods"  # Apple-owned, same block
     if "apple watch" in text or re.search(r"\baw\b", text):   return "watch"
     if " watch" in text or "watch " in text:                  return "watch"
     if "ipad" in text:                                        return "ipad"
     if "macbook" in text or "mac " in text or "mac neo" in text:
                                                               return "mac"
-    if "beats" in text:                                       return "beats"
     return "other"
 
 
@@ -155,6 +155,10 @@ def _item_emoji(item: Dict) -> str:
         return "💎"
     if "homepod" in text:
         return "🔊"
+    if re.search(r"keyboard|клавиатур", text):
+        return "⌨️"
+    if re.search(r"pencil|стилус", text):
+        return "✏️"
     # чехол/case checked AFTER device-specific accessories but BEFORE device emoji,
     # so "AirPods Pro Case" and "Watch Case" get 🛡 not 🎧/⌚
     if re.search(r"чехол|case\b", text):
@@ -164,7 +168,7 @@ def _item_emoji(item: Dict) -> str:
     if "apple watch" in text or re.search(r"\baw\b|\bwatch\b", text):
         return "⌚"
     if "beats" in text:
-        return "🎵"
+        return "🎧"
     return "🍎"
 
 

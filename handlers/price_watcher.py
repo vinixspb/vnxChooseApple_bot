@@ -24,7 +24,7 @@ OWNER_ID         = os.getenv("MANAGER_ID")
 _SECRETARY_TOKEN = os.getenv("SECRETARY_BOT_TOKEN")
 
 # Delay before publishing to channel (accumulates updates from multiple messages)
-_PUBLISH_DELAY = int(os.getenv("PUBLISH_DELAY_MINUTES", "30")) * 60
+_PUBLISH_DELAY = int(os.getenv("PUBLISH_DELAY_MINUTES", "50")) * 60
 
 # Flag file: vnxSECRETARY creates it on "Ручная публикация прайса" → publish now
 _MANUAL_PUBLISH_FLAG = Path(os.getenv(
@@ -59,6 +59,39 @@ async def _notify_owner(bot: Bot, text: str) -> None:
 
 
 _APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
+
+# ── Publish-time filter: remove Samsung/Android phones and non-tech items ─────
+_NON_APPLE_PUB_RE = re.compile(
+    r"^(Samsung\b|Galaxy\b|"
+    r"S\d{1,2}\s|S\d{1,2}$|"        # S24, S25 Ultra etc.
+    r"A\d{2}\b|M\d{2}\b|"            # A56, A57, M55, M56
+    r"Z\s+(?:Flip|Fold)|"            # Z Flip6, Z Fold6
+    r"Sony\b|Xiaomi\b|Mi\s+\d|POCO\b|"
+    r"Honor\b|Huawei\b|OnePlus\b|Oppo\b|Vivo\b|Realme\b|"
+    r"Garmin\b|Fitbit\b"
+    r")", re.IGNORECASE
+)
+_NON_TECH_PUB_RE = re.compile(r"T-Shirt|Футболк|Одежд", re.IGNORECASE)
+
+
+def _is_apple_product(item: dict) -> bool:
+    """
+    Returns False for Samsung/Android phones mislabeled as Apple,
+    and for non-tech items (T-shirts etc.) that leak in from suppliers.
+    """
+    for field in ("item_group_id", "title"):
+        val = str(item.get(field, "")).strip()
+        if not val:
+            continue
+        if _NON_TECH_PUB_RE.search(val):
+            return False
+        if _NON_APPLE_PUB_RE.match(val):
+            return False
+        # Catch "Apple S24 8/", "Apple Z Flip7" etc. after stripping prefix
+        stripped = _APPLE_PREFIX_RE.sub("", val).strip()
+        if stripped != val and _NON_APPLE_PUB_RE.match(stripped):
+            return False
+    return True
 
 
 def _normalize_group(name: str) -> str:
@@ -96,6 +129,8 @@ def _catalog_items_for_publish() -> list[dict]:
     items = []
     for row in store.CATALOG:
         if str(row.get("availability", "")).strip().lower() != "in stock":
+            continue
+        if not _is_apple_product(row):
             continue
         item = dict(row)
         raw_group = row.get("model_group") or row.get("title", "")
@@ -226,7 +261,7 @@ async def _process_price_message(message: types.Message) -> None:
     # 4. Mark catalog dirty — full live catalog gets republished after debounce
     store.CATALOG_DIRTY = True
 
-    # 5. Debounce: cancel existing timer, restart 30-min countdown
+    # 5. Debounce: cancel existing timer, restart 50-min countdown
     await _cancel_publish_task()
     store.PUBLISH_TASK = asyncio.create_task(_delayed_publish(message.bot))
 
