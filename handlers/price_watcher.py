@@ -73,6 +73,14 @@ _NON_APPLE_PUB_RE = re.compile(
 )
 _NON_TECH_PUB_RE = re.compile(r"T-Shirt|Футболк|Одежд", re.IGNORECASE)
 
+# Бренды в любом месте строки: "Беспроводной микрофон DJI Mic 2" и т.п.
+_BRAND_ANYWHERE_PUB_RE = re.compile(
+    r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
+    r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser)\b",
+    re.IGNORECASE,
+)
+
 
 def _is_apple_product(item: dict) -> bool:
     """
@@ -84,6 +92,8 @@ def _is_apple_product(item: dict) -> bool:
         if not val:
             continue
         if _NON_TECH_PUB_RE.search(val):
+            return False
+        if _BRAND_ANYWHERE_PUB_RE.search(val):
             return False
         if _NON_APPLE_PUB_RE.match(val):
             return False

@@ -43,6 +43,15 @@ _NON_APPLE_RE = re.compile(
     r")", re.IGNORECASE
 )
 
+# Бренды, которые ловим в любом месте строки — поставщики часто пишут
+# "Беспроводной микрофон DJI Mic 2", "Наушники Sony WH-1000XM5" и т.п.
+_BRAND_ANYWHERE_RE = re.compile(
+    r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
+    r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser)\b",
+    re.IGNORECASE,
+)
+
 # Samsung-style RAM/Storage notation: "12/256", "8/128" — never used by Apple.
 # Catches disguised Samsung items like "Apple 9 Pro Fold 12/256".
 _SAMSUNG_RAM_RE = re.compile(r"\b\d{1,2}/\d{1,4}\b")
@@ -73,6 +82,9 @@ def _is_non_apple(row: dict) -> bool:
             continue
 
         if _NON_APPLE_RE.match(val):
+            return True
+
+        if _BRAND_ANYWHERE_RE.search(val):
             return True
 
         # Also strip "Apple " prefix and re-check.

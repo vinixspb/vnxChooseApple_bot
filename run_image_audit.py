@@ -227,6 +227,31 @@ _r(r"apple\s*pencil",          _u("ipad-air-m2-select-202405"))
 # ── MacBook Neo (2026 MacBook Air successor) ──────────────────────────────────
 _r(r"macbook\s*neo",           _u("mba-m4-select-202503"))
 
+# ── Чехлы и стёкла: имя без слова "iPhone", только номер модели ───────────────
+# "15 Silicone Case Clay", "16 Pro Max Silicone Case", "Стекло защитное 16 Pro"
+_r(r"\b17\s*pro\s*max\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b17\s*pro\s*max\b",
+   _u("iphone-17-pro-max-finish-select-202509"))
+_r(r"\b17\s*pro\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b17\s*pro\b",
+   _u("iphone-17-pro-finish-select-202509"))
+_r(r"\b16\s*pro\s*max\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b16\s*pro\s*max\b",
+   _u("iphone-16-pro-max-finish-select-202409-6-9inch-desertitanium"))
+_r(r"\b16\s*pro\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b16\s*pro\b",
+   _u("iphone-16-pro-finish-select-202409-6-3inch-desertitanium"))
+_r(r"\b16\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b16\b",
+   _u("iphone-16-finish-select-202409-6-1inch-black"))
+_r(r"\b15\s*pro\s*max\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b15\s*pro\s*max\b",
+   _u("iphone-15-pro-max-black-titanium-select"))
+_r(r"\b15\s*pro\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b15\s*pro\b",
+   _u("iphone-15-pro-black-titanium-select"))
+_r(r"\b15\s*plus\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b15\s*plus\b",
+   _u("iphone-15-plus-black-select"))
+_r(r"\b15\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b15\b",
+   _u("iphone-15-black-select"))
+_r(r"\b14\b.*(case|чехол|стекл)|(case|чехол|стекл).*\b14\b",
+   _u("iphone-14-model-unselect-gallery-1-202209"))
+_r(r"(case|чехол)\b", _u("iphone-16-finish-select-202409-6-1inch-black"))
+_r(r"стекл|защитн", _u("iphone-16-finish-select-202409-6-1inch-black"))
+
 
 def resolve_image(title: str, group_id: str) -> tuple[str, str]:
     """
