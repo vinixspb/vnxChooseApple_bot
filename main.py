@@ -16,7 +16,9 @@ from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 
 # 3. И только теперь наши роутеры
 from handlers import catalog, assistant, magic, group, channel, price_watcher
+from handlers import incidents as incidents_handler
 from handlers.catalog import load_all
+from services import incidents, watchdog
 
 
 async def set_bot_commands(bot: Bot):
@@ -25,6 +27,8 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="reset",  description="🔄 Перезагрузить каталог"),
         BotCommand(command="ai",     description="🤖 Помочь с выбором (AI)"),
         BotCommand(command="status", description="📊 Статус синхронизации"),
+        BotCommand(command="health", description="🩺 Всё ли работает"),
+        BotCommand(command="incidents", description="🚨 Открытые инциденты"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
@@ -50,6 +54,7 @@ async def main():
     # 6. assistant     — catch-all текст/голос (FSM consulting + свободный ввод)
     #                    ↑ ВСЕГДА ПОСЛЕДНИМ — иначе перехватит группу и канал
     dp.include_router(price_watcher.router)
+    dp.include_router(incidents_handler.router)   # команды владельца: /health, /incidents
     dp.include_router(group.router)
     dp.include_router(channel.router)
     dp.include_router(catalog.router)
@@ -57,9 +62,17 @@ async def main():
     dp.include_router(assistant.router)   # catch-all — только последним!
     # ────────────────────────────────────────────────────────────────────────
 
+    incidents.load_history()
+
     await set_bot_commands(bot)
     await load_all()
+
     asyncio.create_task(price_watcher.watch_manual_publish(bot))
+    # Диспетчер инцидентов — разбирает очередь уведомлений владельцу.
+    # Запускается до сторожа, чтобы результаты стартовой проверки было кому отправить.
+    asyncio.create_task(incidents.dispatcher(bot))
+    asyncio.create_task(watchdog.run())
+
     await dp.start_polling(bot)
 
 

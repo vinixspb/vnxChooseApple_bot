@@ -14,6 +14,8 @@ from services.sheets_writer import sync_price_list, write_sync_log
 from services.price_publisher import publish_price
 import services.data_store as store
 from services.sheets_manager import get_data_from_sheet, get_settings
+from services import incidents
+from services import incident_rules as rules
 
 _MSK = ZoneInfo("Europe/Moscow")
 
@@ -164,12 +166,30 @@ async def _publish_pending(bot: Bot, manual: bool = False) -> None:
     store.CATALOG_DIRTY = False
 
     if not items:
+        # Каталог не пуст, а публиковать нечего — значит фильтр съел всё
+        if store.CATALOG:
+            incidents.report(
+                component=rules.PUBLISHER,
+                code="PUBLISH_NOTHING_TO_SHOW",
+                detail=f"В каталоге {len(store.CATALOG)} строк, "
+                       f"после фильтров осталось 0",
+            )
         if manual:
             await _notify_owner(bot, "ℹ️ Каталог пуст — нечего публиковать.")
         return
 
+    incidents.resolve(rules.PUBLISHER, "PUBLISH_NOTHING_TO_SHOW")
+
     ok = await publish_price(bot, items)
+    if not ok:
+        incidents.report(
+            component=rules.PUBLISHER,
+            code="PUBLISH_FAILED",
+            detail=f"Ни одно сообщение не ушло в канал ({len(items)} позиций)",
+            context={"канал": os.getenv("PRICE_CHANNEL_ID", "не задан")},
+        )
     if ok:
+        incidents.resolve(rules.PUBLISHER, "PUBLISH_FAILED")
         cats = set()
         for i in items:
             g = (i.get("item_group_id","") + " " + i.get("title","")).lower()
@@ -234,7 +254,19 @@ async def _process_price_message(message: types.Message) -> None:
 
     raw_items = parse_price_list(text)
     if not raw_items:
+        # Сообщение прошло фильтр looks_like_price_list, но парсер ничего не понял.
+        # Почти всегда это смена формата у поставщика — молча терять такое нельзя.
+        incidents.report(
+            component=rules.PARSER,
+            code="PARSE_EMPTY",
+            detail=f"Прайс от '{source}' не разобран: 0 позиций",
+            key=source,
+            context={"длина сообщения": len(text),
+                     "начало": text[:120].replace("\n", " ")},
+        )
         return
+
+    incidents.resolve(rules.PARSER, "PARSE_EMPTY", key=source)
 
     items = apply_markup(raw_items)
 
@@ -243,6 +275,18 @@ async def _process_price_message(message: types.Message) -> None:
     updated = result["updated"]
     added   = result["added"]
     ok      = updated > 0 or added > 0
+
+    # Тихий отказ: позиции разобраны, но в таблицу не легло ничего.
+    # Ошибки при этом может не быть вовсе — именно так выглядела
+    # потеря прав Редактора, прожившая незамеченной несколько недель.
+    if not ok:
+        incidents.report(
+            component=rules.SHEETS,
+            code="SYNC_WROTE_NOTHING",
+            detail=f"Прайс от '{source}': разобрано {len(items)} позиций, "
+                   f"записано 0",
+            context={"источник": source, "позиций": len(items)},
+        )
 
     # 2. Reload catalog in memory
     if ok:

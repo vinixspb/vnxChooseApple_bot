@@ -2,80 +2,74 @@
 """
 Диагностика доступа к Google Sheets.
 
-Показывает email сервис-аккаунта, проверяет чтение и запись в vnxSHOP.
-Нужен когда скрипты падают с "APIError: [403]: The caller does not have permission".
+Проходит ту же цепочку, что и бот: авторизация → открытие → чтение → запись,
+и печатает, на каком шаге всё сломалось и что с этим делать.
+
+Проверка использует services.sheets_manager.check_access() — ровно ту же
+функцию, которой пользуется сторож внутри бота. Так диагностика и бот
+не могут разойтись во мнениях о том, работает доступ или нет.
 
 Usage:
   python run_sheets_check.py
 """
 
-import json
 import os
 import sys
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from services.sheets_manager import authorize_gspread
+from services.sheets_manager import check_access
+from services import incident_rules as rules
 
 
-def _service_account_email() -> str:
-    raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
-    if raw.startswith("'") and raw.endswith("'"):
-        raw = raw[1:-1]
-    try:
-        return json.loads(raw).get("client_email", "?")
-    except Exception:
-        return "?"
+_STAGE_RU = {
+    "auth":   "авторизация по ключу",
+    "config": "конфигурация .env",
+    "open":   "открытие таблицы",
+    "read":   "чтение листа vnxSHOP",
+    "write":  "запись в лист vnxSHOP",
+    "done":   "всё пройдено",
+}
 
 
 def main():
-    email = _service_account_email()
-    spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    print("🔗 Проверяем доступ к Google Sheets...\n")
 
-    print(f"👤 Сервис-аккаунт: {email}")
-    print(f"📄 SPREADSHEET_ID:  {spreadsheet_id}")
+    res = check_access()
+
+    print(f"👤 Сервис-аккаунт: {res.get('email', '?')}")
+    print(f"📄 SPREADSHEET_ID:  {os.getenv('SPREADSHEET_ID') or '— не задан —'}")
     print()
 
-    if not spreadsheet_id:
-        print("❌ SPREADSHEET_ID не задан в .env")
-        sys.exit(1)
+    if res.get("title"):
+        print(f"✅ Таблица открыта: {res['title']}")
+    if res.get("sheets"):
+        print(f"   Листы: {', '.join(res['sheets'])}")
+    if res.get("read_rows"):
+        print(f"✅ Чтение работает: {res['read_rows']} строк")
 
-    gc = authorize_gspread()
-    if not gc:
-        print("❌ Не удалось авторизоваться — проверь GOOGLE_CREDENTIALS_JSON")
-        sys.exit(1)
-
-    try:
-        ss = gc.open_by_key(spreadsheet_id)
-    except Exception as e:
-        print(f"❌ Не открывается таблица: {e}")
-        sys.exit(1)
-
-    print(f"✅ Таблица открыта: {ss.title}")
-    print(f"   Листы: {', '.join(w.title for w in ss.worksheets())}")
-
-    try:
-        ws = ss.worksheet("vnxSHOP")
-    except Exception as e:
-        print(f"❌ Лист vnxSHOP не найден: {e}")
-        sys.exit(1)
-
-    rows = len(ws.get_all_values())
-    print(f"✅ Чтение работает: {rows} строк")
-
-    # Пробная запись в дальнюю пустую ячейку, потом очищаем
-    probe = "ZZ1"
-    try:
-        ws.update_acell(probe, "probe")
-        ws.update_acell(probe, "")
+    if res["ok"]:
         print("✅ Запись работает — прав Редактора достаточно")
-    except Exception as e:
-        print(f"❌ Запись НЕ работает: {e}")
-        print()
-        print("   Открой таблицу в браузере → «Настройки доступа» →")
-        print(f"   добавь {email} с ролью «Редактор».")
-        sys.exit(1)
+        print("\n🟢 Доступ в порядке.")
+        return
+
+    stage = _STAGE_RU.get(res["stage"], res["stage"])
+    print(f"\n❌ Сломалось на шаге: {stage}")
+    if res.get("error"):
+        print(f"   Ответ Google: {res['error'][:300]}")
+
+    code = res.get("code") or "UNKNOWN"
+    rule = rules.get_rule(code)
+    print(f"\n{rules.SEVERITY_EMOJI.get(rule.severity, '⚪')} {rule.title}")
+    print(f"   код инцидента: {code}")
+    if rule.why:
+        print(f"\n   Почему это важно:\n   {rule.why}")
+    print(f"\n   Что сделать:\n   {rule.fix}")
+    if rule.docs:
+        print(f"\n   📖 {rule.docs}")
+
+    sys.exit(1)
 
 
 if __name__ == "__main__":

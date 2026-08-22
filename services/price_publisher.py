@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 
 from services.channel_manager import delete_old_price_messages, save_message_ids
+from services import incidents
+from services import incident_rules as rules
 
 logger = logging.getLogger(__name__)
 
@@ -285,10 +287,23 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
                 )
                 new_ids.append(msg.message_id)
             except Exception as e:
-                logger.error(f"publish_price [{cat}]: {e}")
+                incidents.report(
+                    component=rules.TELEGRAM,
+                    exc=e,
+                    detail=f"Сообщение категории '{cat}' не отправлено в канал",
+                    key=cat,
+                    context={
+                        "канал":  PRICE_CHANNEL_ID or "не задан",
+                        "длина":  len(text),
+                    },
+                )
 
     if new_ids:
         save_message_ids(new_ids)
         logger.info(f"price_publisher: {len(new_ids)} сообщений, {len(items)} позиций")
+        # Публикация прошла — гасим инциденты доставки в канал
+        for cat in _CATEGORY_ORDER:
+            incidents.ok(rules.TELEGRAM, "TG_FORBIDDEN", "TG_BAD_REQUEST",
+                         "TG_RATE_LIMIT", "TG_NETWORK", key=cat)
         return True
     return False

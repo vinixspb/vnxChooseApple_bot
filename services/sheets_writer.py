@@ -7,8 +7,10 @@ from typing import List, Dict, Any
 import gspread
 import gspread.utils as gu
 
-from services.sheets_manager import authorize_gspread
+from services.sheets_manager import authorize_gspread, service_account_email
 from services.image_mapper import get_image_url
+from services import incidents
+from services import incident_rules as rules
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +153,13 @@ def sync_price_list(
                 purchase_col = header.index("purchase_price") + 1 if "purchase_price" in header else None
                 qty_col      = header.index("quantity_to_sell_on_facebook") + 1 if "quantity_to_sell_on_facebook" in header else None
             except ValueError as e:
-                logger.error(f"Столбец не найден: {e}")
+                incidents.report(
+                    component=rules.SHEETS,
+                    code="SHEETS_WORKSHEET_NOT_FOUND",
+                    exc=e,
+                    detail=f"В листе '{sheet_name}' нет обязательного столбца",
+                    context={"заголовки листа": ", ".join(header[:10])},
+                )
                 return {"updated": 0, "added": 0}
 
             # Карта: id → номер строки (1-based)
@@ -200,6 +208,16 @@ def sync_price_list(
             updated = len({b["range"][1:] for b in batch_updates})
             added   = len(new_rows)
             logger.info(f"sync: обновлено {updated}, добавлено {added} строк в '{sheet_name}'")
+
+            # Запись прошла — гасим инциденты доступа
+            incidents.ok(
+                rules.SHEETS,
+                "SHEETS_AUTH_FAILED", "SHEETS_PERMISSION_DENIED",
+                "SHEETS_API_DISABLED", "SHEETS_NOT_FOUND",
+                "SHEETS_RANGE_INVALID", "SHEETS_QUOTA",
+                "SHEETS_BACKEND", "SHEETS_NETWORK",
+            )
+            incidents.resolve(rules.SHEETS, "SYNC_WROTE_NOTHING")
             return {"updated": updated, "added": added}
 
         except Exception as e:
@@ -207,7 +225,16 @@ def sync_price_list(
                 logger.warning(f"Sheets sync retry {attempt + 1}: {e}")
                 time.sleep(2 ** attempt)
             else:
-                logger.error(f"Sheets sync error: {e}")
+                incidents.report(
+                    component=rules.SHEETS,
+                    exc=e,
+                    detail=f"Запись прайса в лист '{sheet_name}' провалилась "
+                           f"после {retries} попыток — {len(items)} позиций потеряно",
+                    context={
+                        "аккаунт":  service_account_email(),
+                        "позиций":  len(items),
+                    },
+                )
 
     return {"updated": 0, "added": 0}
 
