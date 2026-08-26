@@ -73,15 +73,31 @@ _NON_APPLE_PUB_RE = re.compile(
     r"Garmin\b|Fitbit\b"
     r")", re.IGNORECASE
 )
-_NON_TECH_PUB_RE = re.compile(r"T-Shirt|Футболк|Одежд", re.IGNORECASE)
+# Список синхронизирован с _NON_TECH_RE в run_sheets_cleanup.py:
+# что не попадает в канал, не должно попадать и в фид Meta.
+_NON_TECH_PUB_RE = re.compile(r"T-Shirt|Футболк|Одежд|Толстовк|Худи\b", re.IGNORECASE)
 
 # Бренды в любом месте строки: "Беспроводной микрофон DJI Mic 2" и т.п.
 _BRAND_ANYWHERE_PUB_RE = re.compile(
     r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
     r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
-    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser)\b",
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|"
+    # Honor Magic 8 Pro. Цифра сразу после "Magic" обязательна — у Apple
+    # есть Magic Keyboard и Magic Mouse, их отсекать нельзя.
+    r"Magic\s+\d)\b",
     re.IGNORECASE,
 )
+
+# Запись ОЗУ через дробь: "8/ 256GB", "16/ 1TB". Так поставщики оформляют
+# Honor и Xiaomi, замаскированные под Apple. Сама Apple объём ОЗУ
+# в названии товара не указывает никогда.
+_RAM_STORAGE_PUB_RE = re.compile(r"\b\d{1,2}\s*/\s*\d{2,4}\s*(?:GB|TB)\b", re.IGNORECASE)
+_TRAILING_RAM_PUB_RE = re.compile(r"\b\d{1,2}\s*/\s*$")
+
+# У Mac запись "16/256" означает ОЗУ/SSD и абсолютно законна.
+# Без этой оговорки правило дроби вычистит из канала все макбуки.
+_MAC_PUB_RE = re.compile(r"\b(macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|mac\s+m\d)\b",
+                         re.IGNORECASE)
 
 
 def _is_apple_product(item: dict) -> bool:
@@ -97,6 +113,9 @@ def _is_apple_product(item: dict) -> bool:
             return False
         if _BRAND_ANYWHERE_PUB_RE.search(val):
             return False
+        if not _MAC_PUB_RE.search(val):
+            if _RAM_STORAGE_PUB_RE.search(val) or _TRAILING_RAM_PUB_RE.search(val):
+                return False
         if _NON_APPLE_PUB_RE.match(val):
             return False
         # Catch "Apple S24 8/", "Apple Z Flip7" etc. after stripping prefix

@@ -48,7 +48,10 @@ _NON_APPLE_RE = re.compile(
 _BRAND_ANYWHERE_RE = re.compile(
     r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
     r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
-    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser)\b",
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|"
+    # Honor Magic 8 Pro и т.п. Цифра сразу после "Magic" обязательна:
+    # у Apple есть Magic Keyboard и Magic Mouse, их трогать нельзя.
+    r"Magic\s+\d)\b",
     re.IGNORECASE,
 )
 
@@ -56,10 +59,30 @@ _BRAND_ANYWHERE_RE = re.compile(
 # Catches disguised Samsung items like "Apple 9 Pro Fold 12/256".
 _SAMSUNG_RAM_RE = re.compile(r"\b\d{1,2}/\d{1,4}\b")
 
+# Та же запись, но с пробелом после дроби: "8/ 256GB", "16/ 1TB".
+# Так поставщики пишут Honor и Xiaomi: "Apple Magic 8 Pro 16/ 512GB",
+# "Apple 9 Pro Fold 16/ 256GB". Apple объём ОЗУ в названии не указывает
+# вообще, поэтому дробь перед объёмом памяти — надёжный признак чужого бренда.
+_RAM_STORAGE_RE = re.compile(r"\b\d{1,2}\s*/\s*\d{2,4}\s*(?:GB|TB)\b", re.IGNORECASE)
+
+# Обрезанный item_group_id вида "Apple 7 8/", "Apple Magic 8 Pro 16/" —
+# хвост той же записи, оставшийся после обрезки названия по объёму памяти.
+_TRAILING_RAM_RE = re.compile(r"\b\d{1,2}\s*/\s*$")
+
+# ИСКЛЮЧЕНИЕ из правила дроби: у компьютеров Mac запись "16/256" (ОЗУ/SSD)
+# совершенно законна, её используют все продавцы — "MacBook Air M4 16/256".
+# Без этой оговорки эвристика дроби вычищает из наличия все макбуки разом.
+_MAC_RE = re.compile(r"\b(macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|mac\s+m\d)\b",
+                     re.IGNORECASE)
+
 # "Apple" brand is the default in _DEFAULTS, so non-Apple items often have
 # brand set to "Apple" anyway. We detect by title/item_group_id instead.
 
 _APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
+
+# Не-техника: тестовые и сувенирные позиции, попадающие от поставщиков
+# ("Blue Facebook T-Shirt (Unisex)"). В фид Meta им тоже не место.
+_NON_TECH_RE = re.compile(r"T-Shirt|Футболк|Одежд|Толстовк|Худи\b", re.IGNORECASE)
 
 
 def _is_non_apple(row: dict) -> bool:
@@ -81,11 +104,20 @@ def _is_non_apple(row: dict) -> bool:
         if not val:
             continue
 
+        if _NON_TECH_RE.search(val):
+            return True
+
         if _NON_APPLE_RE.match(val):
             return True
 
         if _BRAND_ANYWHERE_RE.search(val):
             return True
+
+        # Запись ОЗУ через дробь — чужой бренд независимо от префикса "Apple".
+        # Кроме Mac: там "16/256" означает ОЗУ/SSD и совершенно законно.
+        if not _MAC_RE.search(val):
+            if _RAM_STORAGE_RE.search(val) or _TRAILING_RAM_RE.search(val):
+                return True
 
         # Also strip "Apple " prefix and re-check.
         # Catches "Apple S24 8/", "Apple Z Flip7", "Apple M55 8/" etc.
@@ -93,8 +125,9 @@ def _is_non_apple(row: dict) -> bool:
         if val_stripped != val:
             if _NON_APPLE_RE.match(val_stripped):
                 return True
-            # Samsung-style RAM/storage notation not used by Apple
-            if _SAMSUNG_RAM_RE.search(val_stripped):
+            # Samsung-style RAM/storage notation not used by Apple —
+            # но у Mac "16/256" это ОЗУ/SSD и писать так нормально
+            if _SAMSUNG_RAM_RE.search(val_stripped) and not _MAC_RE.search(val):
                 return True
 
     return False
