@@ -3,10 +3,15 @@
 Reads all item_group_id + title values from vnxSHOP, resolves an image URL
 for each via pattern matching, then batch-writes to image_link column.
 
+Картинка ищется в три шага: по артикулу Apple из названия (точное фото
+товара, ссылка проверяется запросом), затем по правилам для модели,
+и в последнюю очередь — заглушка с логотипом.
+
 Usage:
-  python run_image_audit.py           # dry run — show mapping by group
-  python run_image_audit.py --apply   # write to Sheets
-  python run_image_audit.py --dump    # print all unique model names (for debugging)
+  python run_image_audit.py             # dry run — show mapping by group
+  python run_image_audit.py --apply     # write to Sheets
+  python run_image_audit.py --dump      # print all unique model names
+  python run_image_audit.py --no-verify # не проверять ссылки по артикулу
 """
 
 import os
@@ -253,11 +258,67 @@ _r(r"(case|чехол)\b", _u("iphone-16-finish-select-202409-6-1inch-black"))
 _r(r"стекл|защитн", _u("iphone-16-finish-select-202409-6-1inch-black"))
 
 
+# ── Картинка по артикулу Apple ───────────────────────────────────────────────
+# CDN Apple раздаёт фотографии не только по имени модели, но и по артикулу:
+#   .../is/MW493?wid=1000&hei=1000  → фото именно этого кабеля
+# Это точнее правил по моделям: правило даёт обобщённое фото семейства,
+# артикул — снимок конкретного товара в его цвете и комплектации.
+#
+# Поставщики указывают артикул в скобках в конце названия:
+#   "Кабель Apple USB-C to USB-C Charge Cable 60W Тканевый (1m) (MW493)"
+#   "Magic Keyboard 11 (M4) Black (MWR23)"
+#
+# Каждая ссылка проверяется запросом перед записью: несуществующий артикул
+# дал бы битую ссылку, а Meta отклоняет товар с недоступной картинкой —
+# это хуже, чем честная заглушка с логотипом.
+
+_PART_RE = re.compile(r"\(([A-Z]{2}[A-Z0-9]{3})\)")
+
+_part_cache: dict = {}
+
+# Проверять ли ссылки запросом (отключается флагом --no-verify)
+_VERIFY = True
+
+
+def _part_number_url(text: str):
+    """URL по артикулу из названия, если такая картинка действительно есть."""
+    m = _PART_RE.search(text)
+    if not m:
+        return None
+
+    part = m.group(1).upper()
+    if part in _part_cache:
+        return _part_cache[part]
+
+    url = _u(part)
+    ok = True
+    if _VERIFY:
+        try:
+            import requests
+            r = requests.get(url, timeout=10, stream=True)
+            ok = r.status_code == 200
+            r.close()
+        except Exception:
+            ok = False   # нет связи — не рискуем писать непроверенную ссылку
+
+    _part_cache[part] = url if ok else None
+    return _part_cache[part]
+
+
 def resolve_image(title: str, group_id: str) -> tuple[str, str]:
     """
     Returns (url, match_type) where match_type describes how the URL was found.
+
+    Порядок: артикул → правила по модели → заглушка.
+    Артикул первым, потому что это фотография конкретного товара,
+    а правило — лишь обобщённое фото семейства.
     """
     probe = f"{title} {group_id}".strip()
+
+    by_part = _part_number_url(probe)
+    if by_part:
+        return by_part, "part"
+
     for pattern, url in _RULES:
         if pattern.search(probe):
             return url, "matched"
@@ -267,8 +328,12 @@ def resolve_image(title: str, group_id: str) -> tuple[str, str]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    global _VERIFY
     apply = "--apply" in sys.argv
     dump  = "--dump"  in sys.argv
+    if "--no-verify" in sys.argv:
+        _VERIFY = False
+        print("⚠️  Проверка ссылок по артикулу отключена (--no-verify)")
 
     gc = authorize_gspread()
     if not gc:
@@ -329,18 +394,20 @@ def main():
             if key not in seen:
                 seen[key] = (url, mtype)
         for name, (url, mtype) in sorted(seen.items()):
-            flag = "✅" if mtype == "matched" else "⚠️ FALLBACK"
+            flag = {"part": "🎯", "matched": "✅"}.get(mtype, "⚠️ FALLBACK")
             print(f"  {flag}  {name[:50]:<50}  {url[-50:]}")
         return
 
     # ── Preview ──────────────────────────────────────────────────────────────
+    by_part  = [r for r in to_update if r[4] == "part"]
     matched  = [r for r in to_update if r[4] == "matched"]
     fallback = [r for r in to_update if r[4] == "fallback"]
 
     print(f"\n{'='*72}")
     print(f"  Строк для заполнения: {len(to_update)}")
-    print(f"  ✅ Matched:  {len(matched)}")
-    print(f"  ⚠️  Fallback: {len(fallback)}")
+    print(f"  🎯 По артикулу: {len(by_part)}  (фото конкретного товара)")
+    print(f"  ✅ По модели:   {len(matched)}")
+    print(f"  ⚠️  Заглушка:    {len(fallback)}")
     print(f"{'='*72}")
 
     if fallback:
@@ -352,7 +419,13 @@ def main():
                 seen_fb.add(key)
                 print(f"   • {key}")
 
-    print(f"\n── Примеры matched (первые 5) ──")
+    if by_part:
+        print(f"\n── Найдено по артикулу (первые 8) ──")
+        for _, title, group_id, url, _ in by_part[:8]:
+            print(f"  {title[:60]}")
+            print(f"  → {url}")
+
+    print(f"\n── Примеры по модели (первые 5) ──")
     for _, title, group_id, url, _ in matched[:5]:
         print(f"  {title[:55]}")
         print(f"  → {url}")
@@ -382,8 +455,9 @@ def main():
         ws.batch_update(updates[i:i + chunk], value_input_option="RAW")
 
     print(f"\n✅ Готово! Обновлено: {len(to_update)} строк")
-    print(f"   Matched:  {len(matched)}")
-    print(f"   Fallback: {len(fallback)}")
+    print(f"   По артикулу: {len(by_part)}")
+    print(f"   По модели:   {len(matched)}")
+    print(f"   Заглушка:    {len(fallback)}")
     if fallback:
         fb_names = {r[2] or r[1] for r in fallback}
         print(f"\n   Добавь в _RULES паттерны для этих моделей:")
