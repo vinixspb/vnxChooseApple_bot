@@ -18,7 +18,7 @@ from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 from handlers import catalog, assistant, magic, group, channel, price_watcher
 from handlers import incidents as incidents_handler
 from handlers.catalog import load_all
-from services import incidents, watchdog
+from services import incidents, watchdog, specs_db
 
 
 async def set_bot_commands(bot: Bot):
@@ -29,6 +29,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="status", description="📊 Статус синхронизации"),
         BotCommand(command="health", description="🩺 Всё ли работает"),
         BotCommand(command="incidents", description="🚨 Открытые инциденты"),
+        BotCommand(command="specs", description="📐 Характеристики модели"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
@@ -63,6 +64,7 @@ async def main():
     # ────────────────────────────────────────────────────────────────────────
 
     incidents.load_history()
+    specs_db.ensure_ready()   # пересоберёт базу характеристик, если JSON изменился
 
     await set_bot_commands(bot)
     await load_all()

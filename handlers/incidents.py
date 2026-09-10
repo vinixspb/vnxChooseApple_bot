@@ -15,6 +15,7 @@ from aiogram.filters import Command, CommandObject
 
 from services import incidents
 from services import incident_rules as rules
+from services import specs_db
 import services.data_store as store
 
 logger = logging.getLogger(__name__)
@@ -161,3 +162,45 @@ async def cmd_incident(message: types.Message, command: CommandObject):
         return
 
     await message.answer(f"Код <code>{_esc(arg)}</code> не найден.", parse_mode="HTML")
+
+
+@router.message(Command("specs"))
+async def cmd_specs(message: types.Message, command: CommandObject):
+    """
+    Характеристики модели из базы — то же, что видит ассистент.
+
+    Команда нужна, чтобы проверять базу глазами: если здесь пусто,
+    значит и ассистент про это железо говорить не станет.
+    """
+    if not _is_owner(message):
+        return
+
+    arg = (command.args or "").strip()
+    if not arg:
+        rows = specs_db.all_models()
+        if not rows:
+            await message.answer(
+                "База характеристик пуста.\n"
+                "Собери её на сервере: <code>python run_specs.py --rebuild</code>",
+                parse_mode="HTML",
+            )
+            return
+        total = len(specs_db._gap_fields())
+        lines = ["<b>📐 Модели в базе характеристик</b>", ""]
+        for r in rows:
+            lines.append(f"· {_esc(r['model'])} — {specs_db.filled_fields(r)}/{total} полей")
+        lines += ["", "<i>Подробно: /specs 16 Pro Max</i>"]
+        await message.answer("\n".join(lines)[:4000], parse_mode="HTML")
+        return
+
+    row = specs_db.find(arg)
+    if not row:
+        await message.answer(
+            f"❌ «{_esc(arg)}» в базе нет — про эту модель ассистент "
+            f"характеристики называть не будет.\n\n"
+            f"<i>Список моделей: /specs</i>",
+            parse_mode="HTML",
+        )
+        return
+
+    await message.answer(specs_db.format_card(row)[:4000], parse_mode="HTML")
