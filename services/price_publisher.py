@@ -53,6 +53,7 @@ def _fmt_price(price: str | int) -> str:
 
 _SIM_LABELS: Dict[str, str] = {
     "esim":      "eSIM",
+    "esim+esim": "eSIM + eSIM",   # iPhone Duo — физической SIM нет
     "nano+esim": "Nano + eSIM",
     "nano+nano": "Nano + Nano",
     "nanoesim":  "Nano + eSIM",
@@ -127,8 +128,15 @@ def _iphone_group_sort_key(group_name: str) -> tuple:
     gen_match = re.search(r"iphone\s+(\d+)", name)
     gen = int(gen_match.group(1)) if gen_match else 0
 
+    # iPhone Duo — складной флагман без номера поколения. Списки идут по
+    # возрастанию, а сама категория iPhone публикуется последней как самая
+    # заметная, поэтому низ списка — лучшее место. Без этого Duo с gen=0
+    # оказался бы на самом верху, выше iPhone 13.
+    if "duo" in name:
+        gen = 999
+
     # SE is lowest within a generation (treat SE as gen 0 if no number)
-    if "se" in name and gen == 0:
+    elif "se" in name and gen == 0:
         gen = -1  # SE without a number sorts first of all
 
     # Model tier within generation

@@ -137,6 +137,8 @@ def _infer_sim_from_id(item_id: str) -> str:
     ID format: APPLEIPHONE15PRO-256GB-NANOESIM-NATURALTILANIUM
     """
     uid = str(item_id).upper().replace("+", "").replace(" ", "")
+    if "ESIMESIM" in uid:
+        return "eSIM + eSIM"   # iPhone Duo — проверяем до голого ESIM
     if "NANOESIM" in uid:
         return "Nano + eSIM"
     if "NANONANO" in uid:

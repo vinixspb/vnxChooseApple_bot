@@ -54,6 +54,20 @@ cd /opt/vnxChooseApple_bot && python run_image_audit.py --apply
 У каждого проекта свой аккаунт, чужие (например `vnxvpn-service`) использовать нельзя.
 Смена ключа: `python run_set_credentials.py /путь/к/ключу.json`.
 
+## Новая модель Apple
+
+Чек-лист: `docs/NEW_MODEL.md`. Порядок шагов важен.
+
+Первым делом — парсер (`services/price_parser.py`). Поставщики пишут
+сокращённо (`Duo 256 Star White eSim+eSim`), и незнакомое слово
+отбрасывается как не-Apple **молча**, без ошибки и без инцидента.
+Пока модель не узнаётся, остальные шаги бессмысленны.
+
+Картинки — только проверенные ссылки, подбирать ID вручную нельзя:
+`python run_apple_images.py <url страницы товара>`. Добавлять в два места —
+`services/image_mapper.py` (новые строки) и `run_image_audit.py`
+(уже существующие).
+
 ## Система инцидентов
 
 Полная документация: `docs/INCIDENTS.md`.

@@ -114,12 +114,21 @@ def _detect_category(text: str) -> str:
     return ""
 
 
+_APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
+
+
 def get_image_url(item_group_id: str, title: str = "") -> str:
     """
     Return a >=500x500 Apple image URL for the given product.
     Falls back through: exact model → category → generic Apple logo.
+
+    Префикс "Apple " снимается перед поиском. Парсер собирает
+    item_group_id как "Apple iPhone 17 Pro Max", а ключи словаря — без
+    префикса. Без снятия ни точное, ни префиксное совпадение не срабатывало,
+    и КАЖДЫЙ iPhone проваливался в категорийную заглушку с фото iPhone 16.
     """
     probe = (item_group_id or title or "").strip()
+    probe = _APPLE_PREFIX_RE.sub("", probe).strip()
     probe_lc = probe.lower()
 
     # 1. Exact match

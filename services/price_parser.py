@@ -19,6 +19,7 @@ _APPLE_MODEL_RE = re.compile(
     r"iPad|iPhone|MacBook|Mac\s|Mac$|iMac|AirPods|HomePod|Beats|"
     r"Mini\b|"           # iPad Mini shorthand
     r"Air\b|"            # iPad Air / iPhone 17 Air shorthand
+    r"Duo\b|"            # iPhone Duo shorthand (складной, сентябрь 2026)
     r"Pro\s+M\d|"        # iPad Pro M4/M5
     r"Pro\s+Max|"        # iPhone Pro Max shorthand
     r"1[5-9](?:\s|$)|"  # iPhone 15, 16, 17, 18, 19
@@ -258,8 +259,12 @@ def parse_price_list(text: str) -> List[Dict]:
                 connectivity = ""
 
         # ── Detect SIM type (for phones) ─────────────────────────────────────
+        # Порядок альтернатив важен: двойные варианты стоят перед одиночным
+        # eSim, иначе "eSim + eSim" совпадёт с голым "eSim" по первому вхождению
+        # и вторая eSIM потеряется. У iPhone Duo физической SIM нет вообще.
         sim_match = re.search(
-            r"(Nano\s*\+\s*eSim|Nano\s*\+\s*Nano|eSim)", rest, re.IGNORECASE
+            r"(eSim\s*\+\s*eSim|Nano\s*\+\s*eSim|Nano\s*\+\s*Nano|eSim)",
+            rest, re.IGNORECASE
         )
         if sim_match:
             sim   = sim_match.group(1).strip()
@@ -296,6 +301,10 @@ def parse_price_list(text: str) -> List[Dict]:
         elif re.match(r"^Air$", model_part.strip(), re.IGNORECASE):
             # Shorthand "Air" in iPhone price list = iPhone 17 Air
             model_name = "iPhone 17 Air"
+
+        elif re.match(r"^Duo\b", model_part.strip(), re.IGNORECASE):
+            # "Duo 256 Star White" → "iPhone Duo"; складной, только eSIM
+            model_name = "iPhone " + model_part.strip()
 
         elif model_part.strip().lower().startswith("pro max"):
             model_name = "iPhone Pro Max"
