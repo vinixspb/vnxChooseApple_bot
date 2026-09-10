@@ -84,10 +84,26 @@ def _make_id(item_group_id: str, memory: str, sim: str, color: str, region: str 
     return "-".join(filter(None, parts))
 
 
-def _region_from_sim(sim: str) -> str:
-    """Infer iPhone region from SIM configuration (mirrors AiParser.gs rule 11)."""
+def _region_from_sim(sim: str, model_name: str = "") -> str:
+    """
+    Infer iPhone region from SIM configuration (mirrors AiParser.gs rule 11).
+
+    Логика опирается на то, что физический слот есть не везде: американские
+    iPhone идут без него, европейские — с одним нано, китайские — с двумя.
+
+    Исключение — iPhone Duo: он продаётся только с eSIM во всех регионах,
+    поэтому тип SIM про регион не говорит ничего, и честнее вернуть "-",
+    чем пометить весь Duo как американский.
+    """
     s = sim.lower().replace(" ", "").replace("+", "")
-    if s == "esim":
+
+    if "duo" in model_name.lower():
+        return "-"
+
+    # Нет физического слота — американская версия.
+    # esimesim это та же безслотовая версия, просто поставщик указал,
+    # что eSIM можно записать две.
+    if s in ("esim", "esimesim"):
         return "Америка"
     if "nanoesim" in s:
         return "Европа"
@@ -321,7 +337,7 @@ def parse_price_list(text: str) -> List[Dict]:
             kw in model_name.lower()
             for kw in ("ipad", "ipad mini", "ipad air", "ipad pro")
         )
-        region = "-" if is_tablet else _region_from_sim(sim)
+        region = "-" if is_tablet else _region_from_sim(sim, model_name)
 
         item_group_id = f"Apple {model_name}"
         item_id       = _make_id(item_group_id, memory, sim, color)

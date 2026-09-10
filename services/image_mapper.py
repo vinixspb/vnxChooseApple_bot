@@ -19,6 +19,15 @@ import re
 # "Apple " prefix stripped). Case-insensitive match is done at lookup time.
 
 _MODEL_IMAGES: dict[str, str] = {
+    # ── iPhone Duo (складной, сентябрь 2026) ───────────────────────────────
+    # У Duo цвет зашит в сам ID картинки, единого фото модели нет.
+    # Берём Star White как основное — как и для остальных групп, одна
+    # фотография на всю группу независимо от расцветки позиции.
+    "iPhone Duo": "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-duo-finish-select-star-white-202609_AV2?wid=1000&hei=1000&fmt=jpeg&qlt=90",
+
+    # ── iPhone 18 ──────────────────────────────────────────────────────────
+    "iPhone 18 Pro": "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-18-pro-finish-select-202609?wid=1000&hei=1000&fmt=jpeg&qlt=90",
+
     # ── iPhone 17 ──────────────────────────────────────────────────────────
     "iPhone 17 Pro Max": "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-17-pro-max-finish-select-202509?wid=1000&hei=1000&fmt=jpeg&qlt=90",
     "iPhone 17 Pro":     "https://store.storeimages.cdn-apple.com/4982/as-images.apple.com/is/iphone-17-pro-finish-select-202509?wid=1000&hei=1000&fmt=jpeg&qlt=90",

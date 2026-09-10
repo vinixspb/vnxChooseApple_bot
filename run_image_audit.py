@@ -43,6 +43,13 @@ def _r(pattern: str, url: str):
     _RULES.append((re.compile(pattern, re.IGNORECASE), url))
 
 
+# ── iPhone Duo / iPhone 18 (сентябрь 2026) ───────────────────────────────────
+# ID сняты со страниц apple.com через run_apple_images.py и проверены запросом.
+_r(r"iphone\s*duo|\bduo\b",     _u("iphone-duo-finish-select-star-white-202609_AV2"))
+_r(r"iphone\s*18\s*pro",        _u("iphone-18-pro-finish-select-202609"))
+_r(r"\bapple\s+duo\b",          _u("iphone-duo-finish-select-star-white-202609_AV2"))
+_r(r"\bapple\s+18\s*pro\b",     _u("iphone-18-pro-finish-select-202609"))
+
 # ── iPhone 17 ─────────────────────────────────────────────────────────────────
 _r(r"iphone\s*17\s*pro\s*max",  _u("iphone-17-pro-max-finish-select-202509"))
 _r(r"iphone\s*17\s*pro\b",      _u("iphone-17-pro-finish-select-202509"))

@@ -44,6 +44,74 @@ _SKIP_RE = re.compile(
     r"^(og-|social|favicon|apple-touch|chat|nav-|globalnav|store-card-)", re.IGNORECASE
 )
 
+# Обвязка страницы покупки: логотипы платёжных программ, иконки trade-in,
+# промо AppleCare, превью роликов. Встречаются чаще фотографий самого товара,
+# поэтому сортировка по частоте выносит наверх именно их — и первым
+# «лучшим» ID оказывается логотип Apple Card.
+_BOILERPLATE_RE = re.compile(
+    r"applecard|apple-care|applecare|trade-?in|tradein|"
+    r"-vid\d|thumbnail|compare-icon|-swatch|financing|carrier|"
+    r"^tradein-|^iphone-compare-icon",
+    re.IGNORECASE,
+)
+
+# Чем ближе к товарной карточке, тем выше вес.
+# finish-select — тот же тип картинки, что уже используется для остальных
+# моделей в _MODEL_IMAGES, поэтому он и должен побеждать.
+_KIND_WEIGHTS = [
+    (re.compile(r"finish-select", re.I),                 100),
+    (re.compile(r"hero-select", re.I),                    90),
+    (re.compile(r"\bselect\b|-select-", re.I),            80),
+    (re.compile(r"model-unselect-gallery-1", re.I),       70),
+    (re.compile(r"^iphone-compare-(?!icon)", re.I),       50),
+    (re.compile(r"gallery", re.I),                        40),
+    (re.compile(r"witb", re.I),                           10),   # what's in the box
+]
+
+
+def _slug_from_url(url: str) -> str:
+    """'https://.../buy-iphone/iphone-duo' → 'iphone-duo'."""
+    return url.rstrip("/").split("/")[-1].lower()
+
+
+def _score(image_id: str, slug: str, count: int) -> int:
+    """
+    Вес кандидата. Принадлежность к модели решает всё: картинка чужой
+    модели или обвязки не должна обгонять товарную, как бы часто
+    она ни встречалась на странице.
+    """
+    if _BOILERPLATE_RE.search(image_id):
+        return -1
+
+    score = 0
+    if slug and slug in image_id.lower():
+        score += 1000
+    elif slug:
+        return -1        # не про эту модель — отбрасываем
+
+    for pattern, weight in _KIND_WEIGHTS:
+        if pattern.search(image_id):
+            score += weight
+            break
+
+    return score + min(count, 5)   # частота — только как слабый доп. критерий
+
+
+def _pretty_model(slug: str) -> str:
+    """'iphone-duo' → 'iPhone Duo' (а не 'Iphone Duo')."""
+    words = [w for w in re.split(r"[-_]+", slug) if w]
+    out = []
+    for w in words:
+        if w == "iphone":
+            out.append("iPhone")
+        elif w == "ipad":
+            out.append("iPad")
+        elif re.fullmatch(r"\d+(gb|tb)?", w):
+            out.append(w.upper())
+        else:
+            out.append(w.capitalize())
+    return " ".join(out)
+
 
 def _url(image_id: str) -> str:
     return f"{_BASE}{image_id}{_Q}"
@@ -119,7 +187,20 @@ def from_page(url: str) -> list[str]:
         print("   и проверь ID режимом --probe.")
         return []
 
-    return sorted(counts, key=lambda k: (-counts[k], k))
+    slug = _slug_from_url(url)
+    scored = [(image_id, _score(image_id, slug, c)) for image_id, c in counts.items()]
+    relevant = [(i, s) for i, s in scored if s >= 0]
+
+    dropped = len(scored) - len(relevant)
+    if dropped:
+        print(f"   Отброшено как обвязка страницы и чужие модели: {dropped}")
+
+    if not relevant:
+        print(f"⚠️  Картинок для «{slug}» на странице нет — только обвязка.")
+        print("   Проверь адрес страницы или задай ID вручную через --probe.")
+        return []
+
+    return [i for i, _ in sorted(relevant, key=lambda p: (-p[1], p[0]))]
 
 
 def guess_candidates(model: str, date: str) -> list[str]:
@@ -213,8 +294,7 @@ def main():
     if ids:
         print(f"Найдено уникальных ID: {len(ids)}\n")
         good = report(ids)
-        model = re.sub(r"[-_]+", " ", url.rstrip("/").split("/")[-1]).title()
-        print_snippets(model, good)
+        print_snippets(_pretty_model(_slug_from_url(url)), good)
 
 
 if __name__ == "__main__":
