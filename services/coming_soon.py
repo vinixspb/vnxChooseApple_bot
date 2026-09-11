@@ -76,6 +76,9 @@ def format_post(entry: Dict, date_str: str) -> str:
         f"📱 <b>{entry['title']}</b>",
     ]
 
+    if entry.get("subtitle"):
+        lines.append(f"<i>{entry['subtitle']}</i>")
+
     if entry.get("preorder"):
         lines.append(f"📝 Предзаказ: {entry['preorder']}")
     if entry.get("release"):
@@ -86,6 +89,10 @@ def format_post(entry: Dict, date_str: str) -> str:
         lines += ["", "<b>Цены Apple (США)</b>"]
         rows = [f"└ {cap} — ${value:,}".replace(",", " ") for cap, value in prices.items()]
         lines.append("<blockquote expandable>" + "\n".join(rows) + "</blockquote>")
+
+    colors = entry.get("colors") or []
+    if colors:
+        lines += ["", f"🎨 Цвета: {', '.join(colors)}"]
 
     if entry.get("note"):
         lines += ["", f"<i>{entry['note']}</i>"]

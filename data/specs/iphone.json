@@ -41,7 +41,7 @@
     "year": 2026,
     "chip": null,
     "ram_gb": null,
-    "display_inches": null,
+    "display_inches": 6.3,
     "display_tech": null,
     "refresh_hz": null,
     "resolution": null,
@@ -59,10 +59,58 @@
     "water": null,
     "weight_g": null,
     "dimensions_mm": null,
-    "storage_gb": null,
-    "colors": null,
-    "source": "unknown",
-    "note": "Анонс сентябрь 2026. Характеристики не заполнены — нужен прогон run_specs.py --fetch."
+    "storage_gb": [
+      256,
+      512,
+      1024,
+      2048
+    ],
+    "colors": [
+      "Burgundy",
+      "Glacier",
+      "Silver",
+      "Black"
+    ],
+    "source": "apple.com",
+    "note": "Экран, цвета и объёмы — со страницы покупки Apple. Процессор, камеры и габариты ещё не опубликованы."
+  },
+  {
+    "model": "iPhone 18 Pro Max",
+    "year": 2026,
+    "chip": null,
+    "ram_gb": null,
+    "display_inches": 6.9,
+    "display_tech": null,
+    "refresh_hz": null,
+    "resolution": null,
+    "brightness_nits": null,
+    "body_material": null,
+    "camera_main_mp": null,
+    "camera_ultra_mp": null,
+    "camera_tele_mp": null,
+    "tele_zoom": null,
+    "camera_front_mp": null,
+    "video_max": null,
+    "battery_video_h": null,
+    "connector": "USB-C",
+    "sim": "eSIM + eSIM / Nano + eSIM",
+    "water": null,
+    "weight_g": null,
+    "dimensions_mm": null,
+    "storage_gb": [
+      256,
+      512,
+      1024,
+      2048
+    ],
+    "colors": [
+      "Burgundy",
+      "Glacier",
+      "Silver",
+      "Black"
+    ],
+    "source": "apple.com",
+    "note": "Экран, цвета и объёмы — со страницы покупки Apple. Процессор, камеры и габариты ещё не опубликованы."
   },
   {
     "model": "iPhone 17 Pro Max",

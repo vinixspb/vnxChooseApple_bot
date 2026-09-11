@@ -3,17 +3,42 @@
     "key": "iphone18pro",
     "title": "iPhone 18 Pro",
     "status": "Coming Soon",
+    "subtitle": "Экран 6.3″",
     "preorder": null,
     "release": null,
-    "prices_usd": null,
+    "prices_usd": {
+      "256GB": 1199,
+      "512GB": 1399,
+      "1TB": 1799,
+      "2TB": 2399
+    },
+    "colors": ["Burgundy", "Glacier", "Silver", "Black"],
     "note": null,
-    "source": "unknown",
-    "comment": "Даты и цены не заполнены — взять со страницы Apple, когда откроются предзаказы. Пустые поля просто не показываются, выдумывать нельзя."
+    "source": "apple.com/shop",
+    "comment": "Цены и цвета со страницы покупки Apple. Даты предзаказа там не объявлены — оставлены пустыми, выдумывать нельзя."
+  },
+  {
+    "key": "iphone18promax",
+    "title": "iPhone 18 Pro Max",
+    "status": "Coming Soon",
+    "subtitle": "Экран 6.9″",
+    "preorder": null,
+    "release": null,
+    "prices_usd": {
+      "256GB": 1299,
+      "512GB": 1499,
+      "1TB": 1899,
+      "2TB": 2499
+    },
+    "colors": ["Burgundy", "Glacier", "Silver", "Black"],
+    "note": null,
+    "source": "apple.com/shop"
   },
   {
     "key": "iphoneduo",
     "title": "iPhone Duo",
     "status": "Coming Soon",
+    "subtitle": "Складной, экран 7.6″",
     "preorder": "16 октября 2026",
     "release": "23 октября 2026",
     "prices_usd": {
@@ -22,7 +47,8 @@
       "1TB": 2599,
       "2TB": 3199
     },
-    "note": "Складной, титан 5 класса. Только eSIM — физической SIM нет. Star White и Night Sky.",
+    "colors": ["Star White", "Night Sky"],
+    "note": "Титан 5 класса. Только eSIM — физической SIM нет.",
     "source": "apple.com/newsroom"
   }
 ]
