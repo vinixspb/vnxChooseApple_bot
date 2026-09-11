@@ -11,6 +11,7 @@ from aiogram import Bot
 from services.channel_manager import delete_old_price_messages, save_message_ids
 from services import incidents
 from services import incident_rules as rules
+from services import banners
 
 logger = logging.getLogger(__name__)
 
@@ -434,6 +435,32 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
     return _pack_chunks(date_str, lines, sep="\n")
 
 
+async def _send_banner(bot: Bot, category: str) -> int | None:
+    """
+    Отправляет картинку-шапку категории. Возвращает message_id или None.
+
+    Сначала пробуем file_id, сохранённый командой /banner: его не нужно
+    нигде хостить и он не может протухнуть. Если его нет — прямую ссылку
+    из Settings. Нет ни того, ни другого — просто ничего не отправляем.
+    """
+    file_id = banners.get(category)
+    if not file_id:
+        url = _header_image(category)
+        if not url:
+            return None
+        file_id = url
+
+    try:
+        msg = await bot.send_photo(
+            PRICE_CHANNEL_ID, file_id, disable_notification=True
+        )
+        return msg.message_id
+    except Exception as e:
+        # Баннер — украшение. Из-за него публикация прайса падать не должна.
+        logger.warning(f"price_publisher: баннер '{category}' не отправлен: {e}")
+        return None
+
+
 def _header_image(category: str) -> str:
     """
     Картинка-шапка для категории. Берётся из листа Settings, иначе из .env.
@@ -508,6 +535,13 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
         cat_items = by_category.get(cat, [])
         if not cat_items:
             continue
+        # Баннер идёт отдельным сообщением перед блоком — его message_id
+        # попадает в тот же список, поэтому при следующей публикации он
+        # удалится вместе с прайсом и дубля картинок в канале не будет.
+        banner_id = await _send_banner(bot, cat)
+        if banner_id:
+            new_ids.append(banner_id)
+
         header_image = _header_image(cat)
         for text in _format_category_messages(cat, cat_items):
             try:

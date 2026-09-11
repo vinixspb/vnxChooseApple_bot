@@ -30,6 +30,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="health", description="🩺 Всё ли работает"),
         BotCommand(command="incidents", description="🚨 Открытые инциденты"),
         BotCommand(command="specs", description="📐 Характеристики модели"),
+        BotCommand(command="banners", description="🖼 Картинки-шапки прайса"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())

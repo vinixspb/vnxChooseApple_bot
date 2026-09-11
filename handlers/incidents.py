@@ -10,12 +10,13 @@
 import logging
 import os
 
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command, CommandObject
 
 from services import incidents
 from services import incident_rules as rules
 from services import specs_db
+from services import banners
 import services.data_store as store
 
 logger = logging.getLogger(__name__)
@@ -204,3 +205,96 @@ async def cmd_specs(message: types.Message, command: CommandObject):
         return
 
     await message.answer(specs_db.format_card(row)[:4000], parse_mode="HTML")
+
+
+@router.message(F.photo, F.caption.func(lambda c: (c or "").strip().lower().startswith("/banner")))
+async def cmd_banner_photo(message: types.Message):
+    """
+    Сохраняет присланное фото как шапку блока прайса.
+
+    Владелец отправляет фото с подписью «/banner mac» — и всё. Картинку
+    не нужно никуда загружать: Telegram хранит её сам, а бот запоминает
+    идентификатор файла, который не протухает.
+    """
+    if not _is_owner(message):
+        return
+
+    parts = (message.caption or "").split()
+    category = parts[1].lower() if len(parts) > 1 else ""
+
+    if category not in banners.CATEGORIES:
+        await message.answer(
+            "Укажи категорию в подписи к фото: <code>/banner mac</code>\n\n"
+            "Доступны: " + ", ".join(f"<code>{c}</code>" for c in banners.CATEGORIES),
+            parse_mode="HTML",
+        )
+        return
+
+    # Берём самый крупный размер: Telegram отдаёт лесенку превью
+    file_id = message.photo[-1].file_id
+    banners.save(category, file_id)
+
+    await message.answer(
+        f"✅ Баннер для <b>{category}</b> сохранён.\n"
+        f"Он появится над блоком при следующей публикации прайса.\n\n"
+        f"<i>Проверить: /banners · убрать: /banner_off {category}</i>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("banners"))
+async def cmd_banners(message: types.Message):
+    """Показывает, для каких категорий баннеры уже заданы."""
+    if not _is_owner(message):
+        return
+
+    saved = banners.all_banners()
+    lines = ["<b>🖼 Баннеры прайса</b>", ""]
+    for cat in banners.CATEGORIES:
+        mark = "✅" if cat in saved else "—"
+        lines.append(f"{mark} {cat}")
+    lines += [
+        "",
+        "<i>Поставить: отправь фото с подписью</i> <code>/banner mac</code>",
+        "<i>Убрать:</i> <code>/banner_off mac</code>",
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+    for cat, file_id in saved.items():
+        try:
+            await message.answer_photo(file_id, caption=f"Текущий баннер: {cat}")
+        except Exception:
+            await message.answer(f"⚠️ Баннер «{cat}» не открывается — переустанови его.")
+
+
+@router.message(Command("banner_off"))
+async def cmd_banner_off(message: types.Message, command: CommandObject):
+    """Убирает баннер категории."""
+    if not _is_owner(message):
+        return
+
+    category = (command.args or "").strip().lower()
+    if not category:
+        await message.answer("Укажи категорию: <code>/banner_off mac</code>", parse_mode="HTML")
+        return
+
+    if banners.remove(category):
+        await message.answer(f"✅ Баннер «{category}» убран.")
+    else:
+        await message.answer(f"Для «{_esc(category)}» баннера и не было.", parse_mode="HTML")
+
+
+@router.message(Command("banner"))
+async def cmd_banner_help(message: types.Message):
+    """Подсказка, когда команду прислали текстом без фото."""
+    if not _is_owner(message):
+        return
+    await message.answer(
+        "Чтобы поставить картинку над блоком прайса — "
+        "<b>отправь сюда фото</b> и напиши в подписи к нему "
+        "<code>/banner mac</code>.\n\n"
+        "Никуда загружать не нужно, ссылка не потребуется.\n\n"
+        "Категории: " + ", ".join(f"<code>{c}</code>" for c in banners.CATEGORIES) +
+        "\n\n<i>Что уже стоит: /banners</i>",
+        parse_mode="HTML",
+    )
