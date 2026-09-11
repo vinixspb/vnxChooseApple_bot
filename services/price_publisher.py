@@ -33,6 +33,24 @@ _CATEGORY_TITLE = {
     "iphone":    "📱 iPhone",
 }
 
+# Имена файлов-баннеров для категории. Внутренний код категории — не то,
+# как человек назовёт картинку: папка «accessory» напрашивается как
+# «accessories» или «appleaccessories». Перебираем синонимы, чтобы файл
+# подхватывался под любым разумным именем, а не молча игнорировался.
+_CATEGORY_BANNER_KEYS = {
+    "accessory": ["accessory", "accessories", "appleaccessories"],
+    "audio":     ["audio", "airpods", "appleaudio", "sound"],
+    "watch":     ["watch", "applewatch"],
+    "ipad":      ["ipad", "appleipad"],
+    "iphone":    ["iphone", "appleiphone"],
+    "mac":       ["mac", "applemac", "macbook"],
+}
+
+
+def _category_keys(category: str) -> List[str]:
+    return _CATEGORY_BANNER_KEYS.get(category, [category])
+
+
 # Categories with memory/color/sim variants → grouped блоками с <blockquote expandable>
 _GROUPED_CATEGORIES = {"iphone", "ipad"}
 
@@ -551,7 +569,7 @@ def _format_subgrouped(category: str, items: List[Dict]) -> List[tuple]:
 
     header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
               f"<b>{_CATEGORY_TITLE.get(category, category)}</b>")
-    return [(t, [category]) for t in _pack_blocks(header, blocks)]
+    return [(t, _category_keys(category)) for t in _pack_blocks(header, blocks)]
 
 
 def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[tuple]:
@@ -597,7 +615,7 @@ def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[t
 
     header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
               f"<b>{_CATEGORY_TITLE['watch']}</b>")
-    return [(t, [category]) for t in _pack_blocks(header, blocks)]
+    return [(t, _category_keys(category)) for t in _pack_blocks(header, blocks)]
 
 
 def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tuple]:
@@ -615,7 +633,7 @@ def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tu
     def flush():
         if pending:
             for chunk in _pack_blocks(header, pending):
-                out.append((chunk, [category]))
+                out.append((chunk, _category_keys(category)))
             pending.clear()
 
     for name, body in blocks:
@@ -623,7 +641,7 @@ def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tu
         if banners.resolve([key]) and key != category:
             flush()
             for chunk in _pack_blocks(header, [body]):
-                out.append((chunk, [key, category]))
+                out.append((chunk, [key] + _category_keys(category)))
         else:
             pending.append(body)
 
@@ -701,7 +719,7 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
         name  = item.get("title") or item.get("item_group_id", "")
         price = _fmt_price(item.get("price", "0"))
         lines.append(f"{emoji} {name} — {price} ₽")
-    return [(t, [category]) for t in _pack_chunks(date_str, lines, sep="\n")]
+    return [(t, _category_keys(category)) for t in _pack_chunks(date_str, lines, sep="\n")]
 
 
 # ── Темп отправки ────────────────────────────────────────────────────────────
@@ -809,7 +827,7 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
         # Mac отдаёт пары (текст, ключи баннера), остальные категории —
         # просто текст с ключом по имени категории.
         if blocks and not isinstance(blocks[0], tuple):
-            blocks = [(t, [cat]) for t in blocks]
+            blocks = [(t, _category_keys(cat)) for t in blocks]
 
         sent_banner: str | None = None
         for text, banner_keys in blocks:
