@@ -18,11 +18,22 @@ logger = logging.getLogger(__name__)
 PRICE_CHANNEL_ID = os.getenv("PRICE_CHANNEL_ID")
 _MSK = ZoneInfo("Europe/Moscow")  # used in _format_category_message for date
 
-# ── Category order: first = least visible, last = most visible (at bottom) ───
-_CATEGORY_ORDER = ["other", "watch", "airpods", "ipad", "mac", "iphone"]
+# ── Порядок публикации ───────────────────────────────────────────────────────
+# Канал показывает сообщения в порядке отправки, поэтому отправленное
+# ПОСЛЕДНИМ оказывается внизу — на самом видном месте. Отсюда порядок:
+# мелочь наверх, айфоны в самый низ.
+_CATEGORY_ORDER = ["accessory", "audio", "watch", "ipad", "mac", "iphone"]
+
+_CATEGORY_TITLE = {
+    "accessory": "📦 Аксессуары",
+    "audio":     "🎧 Наушники и звук",
+    "watch":     "⌚ Apple Watch",
+    "ipad":      "🖥 iPad",
+    "iphone":    "📱 iPhone",
+}
 
 # Categories with memory/color/sim variants → grouped блоками с <blockquote expandable>
-_GROUPED_CATEGORIES = {"iphone", "ipad", "mac"}
+_GROUPED_CATEGORIES = {"iphone", "ipad"}
 
 # Emoji prefix for group headers in grouped categories
 _GROUP_EMOJI = {
@@ -31,18 +42,71 @@ _GROUP_EMOJI = {
     "mac":    "💻",
 }
 
+# ── Определение категории ────────────────────────────────────────────────────
+# Порядок проверок важен. Аксессуары идут ПЕРВЫМИ, потому что их названия
+# содержат имя модели: «15 Pro Clear Silicone Case» — это чехол, а не iPhone,
+# «Стекло защитное 16 Pro» — стекло, «Magic Keyboard 11» — клавиатура.
+
+_ACCESSORY_RE = re.compile(
+    r"чехол|case\b|стекл|glass|защитн|tempered|screen\s*protect|"
+    r"кабель|cable|зарядк|адаптер|charg|адаптор|"
+    r"keyboard|клавиатур|mouse|мыш|trackpad|pencil|стилус|"
+    r"airtag|ремешок|band\b|док|dock\b|хаб|hub\b|переходник",
+    re.IGNORECASE,
+)
+
+# Модель без слова iPhone: поставщики пишут «Apple 11», «Apple 16e»,
+# «Apple 14 Pro Max». Именно из-за этого полсотни айфонов раньше падали
+# в кучу аксессуаров: проверка искала подстроку «iphone», а её там нет.
+_BARE_IPHONE_RE = re.compile(r"^(?:apple\s+)?(\d{1,2})\s*(e\b|pro|plus|max|air|mini|$|\s)", re.IGNORECASE)
+
+# Целые часы, а не аксессуар к ним. «AW 10 42 Gold Case Gold Milanese Loop» —
+# это часы в сборе: Case здесь означает корпус, а не защитный чехол.
+# Без этой проверки слово Case отправляло такие позиции в «Чехлы».
+_WATCH_MODEL_RE = re.compile(
+    r"\baw\s*\d{1,2}\b|apple\s*watch|\bwatch\s*(?:ultra|se|series|s\d)", re.IGNORECASE
+)
+# А вот это именно аксессуар к часам, даже если рядом написано Watch
+_WATCH_ACCESSORY_RE = re.compile(r"^\s*(ремеш|ремень|band\b|strap)", re.IGNORECASE)
+
 
 def _get_category(item: Dict) -> str:
-    text = (item.get("item_group_id", "") + " " + item.get("title", "")).lower()
-    if "iphone" in text:                                      return "iphone"
-    if "airpods" in text or "airpod" in text:                 return "airpods"
-    if "beats" in text:                                       return "airpods"  # Apple-owned, same block
-    if "apple watch" in text or re.search(r"\baw\b", text):   return "watch"
-    if " watch" in text or "watch " in text:                  return "watch"
-    if "ipad" in text:                                        return "ipad"
-    if "macbook" in text or "mac " in text or "mac neo" in text:
-                                                              return "mac"
-    return "other"
+    group = str(item.get("item_group_id", "")).strip()
+    text = (group + " " + str(item.get("title", ""))).lower()
+
+    # 1. Часы в сборе — до правила аксессуаров: в их названии есть «Case»
+    if _WATCH_MODEL_RE.search(text) and not _WATCH_ACCESSORY_RE.match(text):
+        return "watch"
+
+    # 2. Аксессуары — до всего остального, см. комментарий выше
+    if _ACCESSORY_RE.search(text):
+        return "accessory"
+
+    # 2. Звук
+    if re.search(r"airpods?|beats|homepod|наушник", text):
+        return "audio"
+
+    # 3. Часы
+    if "apple watch" in text or re.search(r"\baw\b|\bwatch\b", text):
+        return "watch"
+
+    if "ipad" in text:
+        return "ipad"
+
+    if re.search(r"macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|mac\s+m\d|mac\s*neo", text):
+        return "mac"
+
+    if "iphone" in text:
+        return "iphone"
+
+    # 4. Голый номер модели — это iPhone
+    if _BARE_IPHONE_RE.match(group):
+        return "iphone"
+
+    # Всё непонятное кладём к аксессуарам, а не в отдельную свалку:
+    # отдельная категория «прочее» превращалась в мусорный ящик,
+    # который никто не читает.
+    return "accessory"
 
 
 # ── Mac: раскладка по линейкам ───────────────────────────────────────────────
@@ -122,6 +186,20 @@ def _mac_line_sort(line: str) -> tuple:
 def _mac_year(group_name: str) -> int:
     m = _MAC_YEAR_RE.search(group_name)
     return int(m.group(1)) if m else 0
+
+
+def _display_group(category: str, group_name: str) -> str:
+    """
+    Имя группы для заголовка блока.
+
+    Из каталога приходит «11», «16e», «14 Pro Max» — префикс «Apple»
+    снимается при нормализации, и в канале оставался голый номер.
+    Возвращаем слово iPhone на место: покупателю «11» ни о чём не говорит.
+    """
+    name = str(group_name).strip()
+    if category == "iphone" and re.match(r"^\d", name):
+        return f"iPhone {name}"
+    return name
 
 
 def _fmt_price(price: str | int) -> str:
@@ -208,9 +286,17 @@ def _iphone_group_sort_key(group_name: str) -> tuple:
     """
     name = group_name.lower()
 
-    # Extract generation number (iPhone 15, iPhone 16 Pro, etc.)
-    gen_match = re.search(r"iphone\s+(\d+)", name)
+    # Номер поколения. Ищем и «iPhone 15», и голое «15», и «16e» —
+    # поставщики пишут по-разному, а порядок должен быть один.
+    # Граница слова после числа не годится: в «16e» за цифрой идёт буква,
+    # и такие модели улетали в начало списка с поколением 0.
+    gen_match = (re.search(r"iphone\s*(\d{1,2})", name)
+                 or re.search(r"^(?:apple\s+)?(\d{1,2})", name))
     gen = int(gen_match.group(1)) if gen_match else 0
+
+    # iPhone Air без номера — это поколение 17
+    if "air" in name and gen == 0:
+        gen = 17
 
     # iPhone Duo — складной флагман без номера поколения. Списки идут по
     # возрастанию, а сама категория iPhone публикуется последней как самая
@@ -223,17 +309,22 @@ def _iphone_group_sort_key(group_name: str) -> tuple:
     elif "se" in name and gen == 0:
         gen = -1  # SE without a number sorts first of all
 
-    # Model tier within generation
+    # Порядок внутри поколения, сверху вниз:
+    # 17e → 17 → 17 Plus → iPhone Air → 17 Pro → 17 Pro Max.
+    # Сначала доступное, ниже — дороже и старше, чтобы флагман оказался
+    # ближе к низу списка, на самом видном месте.
     if "pro max" in name:
-        tier = 4
+        tier = 5
     elif "pro" in name:
+        tier = 4
+    elif re.search(r"\bair\b", name):
         tier = 3
     elif "plus" in name:
         tier = 2
-    elif re.search(r"\bair\b|\be\b", name):
-        tier = 0   # Air and 'e' before base
+    elif re.search(r"\d+\s*e\b|\be\b", name):
+        tier = 0   # 16e, 17e — самые доступные
     else:
-        tier = 1   # base model
+        tier = 1   # базовая модель
 
     return (gen, tier)
 
@@ -384,11 +475,168 @@ def _pack_blocks(header: str, blocks: List[str]) -> List[str]:
     return out
 
 
-def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
+# ── Подгруппы внутри простых категорий ───────────────────────────────────────
+# Плоский список в полсотни строк читать невозможно: клавиатуры вперемешку
+# с чехлами, колонками и метками. Разбиваем на понятные полки.
+# Порядок правил = порядок полок в сообщении.
+
+_SUBGROUPS: Dict[str, List[tuple]] = {
+    "accessory": [
+        ("🛡", "Чехлы и защита",  r"чехол|case\b|стекл|glass|защитн|tempered|screen"),
+        ("🔌", "Кабели и зарядка", r"кабель|cable|зарядк|адаптер|charg|переходник"),
+        ("⌨️", "Клавиатуры и стилусы", r"keyboard|клавиатур|mouse|мыш|trackpad|pencil|стилус"),
+        ("🔘", "AirTag",          r"airtag"),
+        ("⌚", "Ремешки",          r"ремешок|band\b"),
+    ],
+    "audio": [
+        ("🎧", "AirPods",  r"airpods?"),
+        ("🎧", "Beats",    r"beats"),
+        ("🔊", "HomePod",  r"homepod"),
+    ],
+}
+
+_SUBGROUP_FALLBACK = ("📦", "Прочее")
+
+
+def _format_subgrouped(category: str, items: List[Dict]) -> List[tuple]:
+    """
+    Простая категория, разложенная по полкам: аксессуары, звук.
+
+    Внутри полки сортировка по названию, чтобы одинаковые товары
+    разных цветов стояли рядом.
+    """
+    date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+    rules = _SUBGROUPS.get(category, [])
+
+    shelves: Dict[str, List[Dict]] = defaultdict(list)
+    order: List[str] = []
+
+    for item in items:
+        text = (str(item.get("item_group_id", "")) + " " + str(item.get("title", ""))).lower()
+        placed = False
+        for emoji, title, pattern in rules:
+            if re.search(pattern, text, re.IGNORECASE):
+                key = f"{emoji} {title}"
+                if key not in shelves:
+                    order.append(key)
+                shelves[key].append(item)
+                placed = True
+                break
+        if not placed:
+            key = f"{_SUBGROUP_FALLBACK[0]} {_SUBGROUP_FALLBACK[1]}"
+            if key not in shelves:
+                order.append(key)
+            shelves[key].append(item)
+
+    # Полки идут в порядке правил, «Прочее» всегда последним
+    rule_order = [f"{e} {t}" for e, t, _ in rules]
+    order.sort(key=lambda k: rule_order.index(k) if k in rule_order else 99)
+
+    blocks = []
+    for key in order:
+        rows = sorted(shelves[key], key=lambda x: (x.get("title") or x.get("item_group_id", "")))
+        lines = []
+        for item in rows:
+            name  = item.get("title") or item.get("item_group_id", "")
+            price = _fmt_price(item.get("price", "0"))
+            lines.append(f"└ {name} — {price} ₽")
+        blocks.append(
+            f"<b>{key}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
+        )
+
+    header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
+              f"<b>{_CATEGORY_TITLE.get(category, category)}</b>")
+    return [(t, [category]) for t in _pack_blocks(header, blocks)]
+
+
+def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[tuple]:
+    """Часы по модельным рядам: Series, Ultra, SE — каждый своим блоком."""
+    date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+
+    def line(group: str) -> str:
+        t = group.lower()
+        ultra = re.search(r"ultra\s*(\d)", t)
+        if ultra:
+            return f"Apple Watch Ultra {ultra.group(1)}"
+        if re.search(r"\bse\b", t):
+            return "Apple Watch SE"
+        # «AW 10 42», «Series 10», «S10» — всё это Series 10
+        series = re.search(r"(?:series|\bs|\baw)\s*(\d{1,2})\b", t)
+        if series:
+            return f"Apple Watch Series {series.group(1)}"
+        return "Apple Watch"
+
+    groups: Dict[str, List[Dict]] = defaultdict(list)
+    for item in items:
+        groups[line(str(item.get("item_group_id", "")))].append(item)
+
+    def sort_key(name: str) -> tuple:
+        if "Ultra" in name:
+            return (2, int(re.search(r"(\d+)", name).group(1)) if re.search(r"\d", name) else 0)
+        if "SE" in name:
+            return (0, 0)
+        m = re.search(r"(\d+)", name)
+        return (1, int(m.group(1)) if m else 0)
+
+    blocks = []
+    for name in sorted(groups, key=sort_key):
+        rows = sorted(groups[name], key=lambda x: (x.get("title") or ""))
+        lines = []
+        for item in rows:
+            title = item.get("title") or item.get("item_group_id", "")
+            price = _fmt_price(item.get("price", "0"))
+            lines.append(f"└ {title} — {price} ₽")
+        blocks.append(
+            f"⌚ <b>{name}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
+        )
+
+    header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
+              f"<b>{_CATEGORY_TITLE['watch']}</b>")
+    return [(t, [category]) for t in _pack_blocks(header, blocks)]
+
+
+def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tuple]:
+    """
+    Группа со своей картинкой выезжает в отдельный пост.
+
+    Правило простое и наглядное: положил assets/banners/iphoneair.png —
+    iPhone Air получил собственный пост с этим баннером. Не положил —
+    группа едет вместе с остальными. Так можно выделить хоть одну модель,
+    хоть все, не трогая код.
+    """
+    out: List[tuple] = []
+    pending: List[str] = []
+
+    def flush():
+        if pending:
+            for chunk in _pack_blocks(header, pending):
+                out.append((chunk, [category]))
+            pending.clear()
+
+    for name, body in blocks:
+        key = banners.slug(name)
+        if banners.resolve([key]) and key != category:
+            flush()
+            for chunk in _pack_blocks(header, [body]):
+                out.append((chunk, [key, category]))
+        else:
+            pending.append(body)
+
+    flush()
+    return out
+
+
+def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
 
     if category == "mac":
         return _format_mac_messages(items)
+
+    if category in _SUBGROUPS:
+        return _format_subgrouped(category, items)
+
+    if category == "watch":
+        return _format_watch_messages(items)
 
     if category in _GROUPED_CATEGORIES:
         group_emoji = _GROUP_EMOJI.get(category, "")
@@ -405,6 +653,7 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
 
         blocks = []
         for group_name in sorted_groups:
+            display_name = _display_group(category, group_name)
             sorted_items = sorted(
                 groups[group_name],
                 key=lambda x: (
@@ -424,13 +673,19 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
                 spec   = " | ".join(parts) if parts else "—"
                 block_lines.append(f"└ {spec} — {price} ₽")
 
-            blocks.append(
-                f"{group_emoji} <b>{group_name}</b>\n"
+            blocks.append((
+                display_name,
+                f"{group_emoji} <b>{display_name}</b>\n"
                 f"<blockquote expandable>{chr(10).join(block_lines)}</blockquote>"
-            )
-        return _pack_chunks(date_str, blocks, sep="\n\n")
+            ))
 
-    # Simple flat list — accessories, AirPods, Watch, Beats: emoji + name — price
+        header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
+                  f"<b>{_CATEGORY_TITLE.get(category, category)}</b>")
+        return _split_by_banner(category, header, blocks)
+
+    # Подстраховка: категория без своего оформления выходит плоским списком.
+    # Сейчас такого не бывает — все категории разложены по полкам выше, —
+    # но пусть непредусмотренное печатается, а не теряется.
     sorted_items = sorted(
         items,
         key=lambda x: (x.get("item_group_id", ""), _memory_gb(x.get("memory", "")), x.get("color", "")),
@@ -441,7 +696,7 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
         name  = item.get("title") or item.get("item_group_id", "")
         price = _fmt_price(item.get("price", "0"))
         lines.append(f"{emoji} {name} — {price} ₽")
-    return _pack_chunks(date_str, lines, sep="\n")
+    return [(t, [category]) for t in _pack_chunks(date_str, lines, sep="\n")]
 
 
 async def _send_banner(bot: Bot, found: tuple) -> int | None:

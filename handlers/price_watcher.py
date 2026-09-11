@@ -81,7 +81,7 @@ _NON_TECH_PUB_RE = re.compile(r"T-Shirt|Футболк|Одежд|Толстов
 _BRAND_ANYWHERE_PUB_RE = re.compile(
     r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
     r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
-    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|"
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|Pitaka|Spigen|Nillkin|Belkin|"
     # Honor Magic 8 Pro. Цифра сразу после "Magic" обязательна — у Apple
     # есть Magic Keyboard и Magic Mouse, их отсекать нельзя.
     r"Magic\s+\d)\b",

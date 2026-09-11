@@ -48,7 +48,7 @@ _NON_APPLE_RE = re.compile(
 _BRAND_ANYWHERE_RE = re.compile(
     r"\b(Samsung|Galaxy|DJI|Sony|Xiaomi|POCO|Honor|Huawei|OnePlus|"
     r"Oppo|Vivo|Realme|Garmin|Fitbit|Nothing\s+Phone|Tecno|Infinix|"
-    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|"
+    r"Insta360|GoPro|Anker|Baseus|Ugreen|JBL|Marshall|Bose|Sennheiser|Pitaka|Spigen|Nillkin|Belkin|"
     # Honor Magic 8 Pro и т.п. Цифра сразу после "Magic" обязательна:
     # у Apple есть Magic Keyboard и Magic Mouse, их трогать нельзя.
     r"Magic\s+\d)\b",
