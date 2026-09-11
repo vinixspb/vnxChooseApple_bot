@@ -436,7 +436,7 @@ def _format_mac_messages(items: List[Dict]) -> List[tuple]:
                 color = r.get("color", "-")
                 price = _fmt_price(r.get("price", "0"))
                 parts = [p for p in [spec, color] if p and p != "-"]
-                body.append(f"└ {' | '.join(parts)} — {price} ₽")
+                body.append(f"• {' | '.join(parts)} — {price} ₽")
 
             # Размер уже в заголовке поста — в блоке остаётся семейство и чип
             family = re.sub(r"\s*\d{2}″$", "", line)
@@ -544,7 +544,7 @@ def _format_subgrouped(category: str, items: List[Dict]) -> List[tuple]:
         for item in rows:
             name  = item.get("title") or item.get("item_group_id", "")
             price = _fmt_price(item.get("price", "0"))
-            lines.append(f"└ {name} — {price} ₽")
+            lines.append(f"• {name} — {price} ₽")
         blocks.append(
             f"<b>{key}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
         )
@@ -590,7 +590,7 @@ def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[t
         for item in rows:
             title = item.get("title") or item.get("item_group_id", "")
             price = _fmt_price(item.get("price", "0"))
-            lines.append(f"└ {title} — {price} ₽")
+            lines.append(f"• {title} — {price} ₽")
         blocks.append(
             f"⌚ <b>{name}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
         )
@@ -676,7 +676,7 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
                 price  = _fmt_price(item.get("price", "0"))
                 parts  = [p for p in [mem, color, sim, region] if p and p != "-"]
                 spec   = " | ".join(parts) if parts else "—"
-                block_lines.append(f"└ {spec} — {price} ₽")
+                block_lines.append(f"• {spec} — {price} ₽")
 
             blocks.append((
                 display_name,

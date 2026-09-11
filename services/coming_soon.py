@@ -87,7 +87,7 @@ def format_post(entry: Dict, date_str: str) -> str:
     prices = entry.get("prices_usd") or {}
     if prices:
         lines += ["", "<b>Цены Apple (США)</b>"]
-        rows = [f"└ {cap} — ${value:,}".replace(",", " ") for cap, value in prices.items()]
+        rows = [f"• {cap} — ${value:,}".replace(",", " ") for cap, value in prices.items()]
         lines.append("<blockquote expandable>" + "\n".join(rows) + "</blockquote>")
 
     colors = entry.get("colors") or []
