@@ -253,8 +253,15 @@ async def cmd_banners(message: types.Message):
 
     if assets:
         lines.append("<b>Из репозитория</b> <i>(assets/banners)</i>")
-        for k in assets:
-            lines.append(f"  📁 <code>{_esc(k)}</code>")
+        for key, filename in assets:
+            lines.append(f"  📁 <code>{_esc(key)}</code> — {_esc(filename)}")
+        lines.append("")
+
+    problems = banners.asset_problems()
+    if problems:
+        lines.append("<b>⚠️ Проблемы с файлами</b>")
+        for p in problems:
+            lines.append(f"  {_esc(p)}")
         lines.append("")
     if ids:
         lines.append("<b>Присланы боту</b>")
@@ -266,9 +273,9 @@ async def cmd_banners(message: types.Message):
 
     lines += [
         "<b>Как поставить</b>",
-        "Положить файл <code>assets/banners/macbookair13.jpg</code> "
+        "Положить файл <code>assets/banners/macbookair13.png</code> "
         "в репозиторий и сделать git pull на сервере — картинка нигде "
-        "не публикуется.",
+        "не публикуется. Формат любой: png, jpg, webp.",
         "",
         "Либо отправить сюда фото с подписью <code>/banner macbookair13</code>.",
         "",

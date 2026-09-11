@@ -102,25 +102,73 @@ def remove(key: str) -> bool:
 
 # ── Файлы в репозитории ──────────────────────────────────────────────────────
 
-def asset_path(key: str) -> Optional[Path]:
-    """Путь к картинке в assets/banners, если она там есть."""
-    k = slug(key)
-    if not ASSETS_DIR.exists():
-        return None
-    for ext in _EXTENSIONS:
-        p = ASSETS_DIR / f"{k}{ext}"
-        if p.is_file():
-            return p
-    return None
+# Телеграм отклоняет фото тяжелее 10 МБ
+_MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 
-def list_assets() -> List[str]:
+def _image_files() -> List[Path]:
     if not ASSETS_DIR.exists():
         return []
     return sorted(
-        p.stem for p in ASSETS_DIR.iterdir()
+        p for p in ASSETS_DIR.iterdir()
         if p.is_file() and p.suffix.lower() in _EXTENSIONS
     )
+
+
+def asset_path(key: str) -> Optional[Path]:
+    """
+    Путь к картинке в assets/banners, если она там есть.
+
+    Сравнение идёт по нормализованному имени, а не по точному совпадению
+    с расширением. Поэтому «macbookair13.png», «macbookair13.jpg»,
+    «MacBookAir13.PNG» и «macbook-air-13.webp» — это одно и то же:
+    формат и написание файла роли не играют.
+    """
+    k = slug(key)
+    if not k:
+        return None
+
+    matches = [p for p in _image_files() if slug(p.stem) == k]
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        logger.warning(
+            f"banners: под ключ '{k}' подходит несколько файлов "
+            f"({', '.join(p.name for p in matches)}), берём {matches[0].name}"
+        )
+    return matches[0]
+
+
+def asset_problems() -> List[str]:
+    """Файлы, которые Telegram не примет: слишком тяжёлые или неоднозначные."""
+    problems = []
+    by_key: Dict[str, List[Path]] = {}
+
+    for p in _image_files():
+        by_key.setdefault(slug(p.stem), []).append(p)
+        try:
+            size = p.stat().st_size
+            if size > _MAX_PHOTO_BYTES:
+                problems.append(
+                    f"{p.name} — {size // (1024*1024)} МБ, Telegram примет до 10 МБ"
+                )
+        except OSError:
+            pass
+
+    for k, files in by_key.items():
+        if len(files) > 1:
+            problems.append(
+                f"под ключ «{k}» несколько файлов: "
+                + ", ".join(f.name for f in files)
+            )
+
+    return problems
+
+
+def list_assets() -> List[Tuple[str, str]]:
+    """Пары (ключ, имя файла) — чтобы в списке было видно и формат."""
+    return [(slug(p.stem), p.name) for p in _image_files()]
 
 
 # ── Разрешение источника ─────────────────────────────────────────────────────

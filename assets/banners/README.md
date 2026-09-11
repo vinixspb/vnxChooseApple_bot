@@ -7,9 +7,9 @@
 Положить картинку с именем-ключом и закоммитить:
 
 ```
-assets/banners/macbookair13.jpg
-assets/banners/macbookair15.jpg
-assets/banners/iphone.jpg
+assets/banners/macbookair13.png
+assets/banners/macbookair15.png
+assets/banners/iphone.png
 ```
 
 Затем на сервере:
@@ -40,7 +40,24 @@ cd /opt/vnxChooseApple_bot && git pull origin claude/funny-shannon-bMuuR && appl
 Одна картинка `mac.jpg` закроет все маки сразу. Хочешь разные —
 заводи `macbookair13.jpg` и `macbookair15.jpg`.
 
-Форматы: `.jpg`, `.jpeg`, `.png`, `.webp`.
+## Формат и имя файла не важны
+
+Годятся `.png`, `.jpg`, `.jpeg`, `.webp` — все читаются одинаково.
+`.gif` не подойдёт: Telegram отправит его анимацией, а не фотографией.
+
+Имя сверяется по нормализованному виду, поэтому всё это один и тот же ключ:
+
+```
+macbookair13.png
+macbookair13.jpg
+MacBookAir13.PNG
+macbook-air-13.png
+MacBook Air 13.png
+```
+
+Регистр, дефисы и пробелы роли не играют. Класть два файла под один ключ
+(например `mac.png` и `mac.jpg`) не надо — бот возьмёт один из них
+и предупредит об этом в `/banners`.
 
 Если один и тот же баннер выпадает нескольким блокам подряд, он
 отправляется один раз, а не перед каждым.
@@ -49,3 +66,6 @@ cd /opt/vnxChooseApple_bot && git pull origin claude/funny-shannon-bMuuR && appl
 
 Telegram сжимает крупные фото. Разумно 1200–1600 пикселей по ширине,
 пропорции близкие к 3:1 — как у баннера на всю ширину сообщения.
+
+Ограничение Telegram — 10 МБ на фотографию. PNG без сжатия легко перевалит
+за него; если это случится, `/banners` покажет предупреждение с размером.
