@@ -12,6 +12,7 @@ from services.channel_manager import delete_old_price_messages, save_message_ids
 from services import incidents
 from services import incident_rules as rules
 from services import banners
+from services import coming_soon
 
 logger = logging.getLogger(__name__)
 
@@ -836,6 +837,27 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
                         "длина":  len(text),
                     },
                 )
+
+    # Анонсы — в самом конце, то есть внизу канала, на самом видном месте.
+    # Модель, уже появившаяся в наличии, из анонсов выпадает сама.
+    date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+    in_stock_groups = [str(i.get("item_group_id", "")) for i in items]
+    for entry in coming_soon.pending(in_stock_groups):
+        found = banners.resolve([entry.get("key", "")])
+        if found:
+            banner_id = await _send_banner(bot, found)
+            if banner_id:
+                new_ids.append(banner_id)
+        try:
+            msg = await _send_block(bot, coming_soon.format_post(entry, date_str))
+            new_ids.append(msg.message_id)
+        except Exception as e:
+            incidents.report(
+                component=rules.TELEGRAM,
+                exc=e,
+                detail=f"Анонс «{entry.get('title')}» не отправлен в канал",
+                key="coming_soon",
+            )
 
     if new_ids:
         save_message_ids(new_ids)

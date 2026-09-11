@@ -1,0 +1,28 @@
+[
+  {
+    "key": "iphone18pro",
+    "title": "iPhone 18 Pro",
+    "status": "Coming Soon",
+    "preorder": null,
+    "release": null,
+    "prices_usd": null,
+    "note": null,
+    "source": "unknown",
+    "comment": "Даты и цены не заполнены — взять со страницы Apple, когда откроются предзаказы. Пустые поля просто не показываются, выдумывать нельзя."
+  },
+  {
+    "key": "iphoneduo",
+    "title": "iPhone Duo",
+    "status": "Coming Soon",
+    "preorder": "16 октября 2026",
+    "release": "23 октября 2026",
+    "prices_usd": {
+      "256GB": 1999,
+      "512GB": 2199,
+      "1TB": 2599,
+      "2TB": 3199
+    },
+    "note": "Складной, титан 5 класса. Только eSIM — физической SIM нет. Star White и Night Sky.",
+    "source": "apple.com/newsroom"
+  }
+]
