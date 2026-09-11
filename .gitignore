@@ -7,3 +7,6 @@ data/publish_now.flag
 data/specs.sqlite3
 data/incidents.jsonl
 data/banners.json
+
+# Резервные копии баннеров до подгонки пропорций
+assets/banners/*.orig
