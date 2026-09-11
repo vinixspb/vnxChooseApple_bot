@@ -68,6 +68,21 @@ cd /opt/vnxChooseApple_bot && python run_image_audit.py --apply
 `services/image_mapper.py` (новые строки) и `run_image_audit.py`
 (уже существующие).
 
+## Прайс в канале
+
+Принудительная публикация, не дожидаясь 50-минутного таймера:
+
+```bash
+touch /opt/vnxChooseApple_bot/data/publish_now.flag
+```
+
+Бот проверяет флаг раз в 5 секунд. Это же делает кнопка «Ручная публикация»
+в vnxSECRETARY.
+
+Картинки-шапки блоков лежат в `assets/banners/` (см. README там же).
+Имя файла — ключ блока: `macbookair13.png`, `macbookair15.png`, `mac.png`.
+Формат и регистр значения не имеют, ищется по нормализованному имени.
+
 ## Система инцидентов
 
 Полная документация: `docs/INCIDENTS.md`.
