@@ -292,9 +292,12 @@ def _pack_chunks(date_str: str, blocks: List[str], sep: str) -> List[str]:
     ]
 
 
-def _format_mac_messages(items: List[Dict]) -> List[str]:
+def _format_mac_messages(items: List[Dict]) -> List[tuple]:
     """
     Отдельное сообщение на каждую линейку Mac, внутри — блоки по процессорам.
+
+    Возвращает пары (текст, ключи баннера): у каждой линейки может быть
+    своя картинка-шапка.
 
     Внутри блока сортировка по ОЗУ, затем по диску, затем по цвету: человек
     уже выбрал размер и процессор, дальше он сравнивает конфигурации и цену.
@@ -311,7 +314,7 @@ def _format_mac_messages(items: List[Dict]) -> List[str]:
         entry["_ram"] = ram
         lines[_mac_line(clean)][_mac_chip(clean) or "—"].append(entry)
 
-    messages: List[str] = []
+    messages: List[tuple] = []
     for line in sorted(lines, key=_mac_line_sort):
         chips = lines[line]
         blocks: List[str] = []
@@ -347,8 +350,14 @@ def _format_mac_messages(items: List[Dict]) -> List[str]:
             )
 
         header = f"🍏 <b>Актуальный прайс — {date_str}</b>\n🆕 <b>{line}</b> 🆕"
+
+        # Ключи баннера от частного к общему: своя картинка у 13-дюймовых,
+        # иначе общая для Air, иначе общая для всех маков.
+        family = re.sub(r"\s*\d{2}″$", "", line)
+        keys = [banners.slug(line), banners.slug(family), "mac"]
+
         for chunk in _pack_blocks(header, blocks):
-            messages.append(chunk)
+            messages.append((chunk, keys))
 
     return messages
 
@@ -435,78 +444,34 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
     return _pack_chunks(date_str, lines, sep="\n")
 
 
-async def _send_banner(bot: Bot, category: str) -> int | None:
+async def _send_banner(bot: Bot, found: tuple) -> int | None:
     """
-    Отправляет картинку-шапку категории. Возвращает message_id или None.
+    Отправляет картинку-шапку. Возвращает message_id или None.
 
-    Сначала пробуем file_id, сохранённый командой /banner: его не нужно
-    нигде хостить и он не может протухнуть. Если его нет — прямую ссылку
-    из Settings. Нет ни того, ни другого — просто ничего не отправляем.
+    Файл из репозитория уходит как загрузка: так он не зависит от того,
+    открыт ли репозиторий наружу, и его не видно ни в одном чате.
+    file_id и ссылка отправляются как есть.
     """
-    file_id = banners.get(category)
-    if not file_id:
-        url = _header_image(category)
-        if not url:
-            return None
-        file_id = url
+    key, kind, value = found
 
     try:
+        if kind == "file":
+            from aiogram.types import FSInputFile
+            photo = FSInputFile(str(value))
+        else:
+            photo = str(value)
+
         msg = await bot.send_photo(
-            PRICE_CHANNEL_ID, file_id, disable_notification=True
+            PRICE_CHANNEL_ID, photo, disable_notification=True
         )
         return msg.message_id
     except Exception as e:
         # Баннер — украшение. Из-за него публикация прайса падать не должна.
-        logger.warning(f"price_publisher: баннер '{category}' не отправлен: {e}")
+        logger.warning(f"price_publisher: баннер '{key}' не отправлен: {e}")
         return None
 
 
-def _header_image(category: str) -> str:
-    """
-    Картинка-шапка для категории. Берётся из листа Settings, иначе из .env.
-
-    Через Settings — чтобы менять баннер без правки кода и перезапуска бота.
-    """
-    try:
-        import services.data_store as store
-        from_settings = str(store.SETTINGS.get(f"{category.upper()}_HEADER_IMAGE", "")).strip()
-        if from_settings:
-            return from_settings
-    except Exception:
-        pass
-    if category == "mac":
-        return _MAC_HEADER_IMAGE
-    return os.getenv(f"{category.upper()}_HEADER_IMAGE", "")
-
-
-async def _send_block(bot: Bot, text: str, image_url: str = ""):
-    """
-    Отправляет блок прайса, при наличии ссылки — с картинкой над текстом.
-
-    Картинка идёт превью ссылки с флагом show_above_text, а не отдельным
-    фото с подписью: у подписи к фото лимит 1024 символа, в него прайс
-    не помещается, да и разбивать список на фото и текст неудобно читать.
-    Флаг появился в Bot API 7.0; на старом aiogram аккуратно откатываемся
-    к обычному сообщению, чтобы публикация не сорвалась из-за баннера.
-    """
-    if image_url:
-        try:
-            from aiogram.types import LinkPreviewOptions
-            return await bot.send_message(
-                PRICE_CHANNEL_ID,
-                text,
-                parse_mode="HTML",
-                disable_notification=True,
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=False,
-                    url=image_url,
-                    prefer_large_media=True,
-                    show_above_text=True,
-                ),
-            )
-        except (ImportError, TypeError) as e:
-            logger.warning(f"price_publisher: баннер не поддержан этой версией aiogram ({e})")
-
+async def _send_block(bot: Bot, text: str):
     return await bot.send_message(
         PRICE_CHANNEL_ID,
         text,
@@ -535,17 +500,26 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
         cat_items = by_category.get(cat, [])
         if not cat_items:
             continue
-        # Баннер идёт отдельным сообщением перед блоком — его message_id
-        # попадает в тот же список, поэтому при следующей публикации он
-        # удалится вместе с прайсом и дубля картинок в канале не будет.
-        banner_id = await _send_banner(bot, cat)
-        if banner_id:
-            new_ids.append(banner_id)
+        blocks = _format_category_messages(cat, cat_items)
+        # Mac отдаёт пары (текст, ключи баннера), остальные категории —
+        # просто текст с ключом по имени категории.
+        if blocks and not isinstance(blocks[0], tuple):
+            blocks = [(t, [cat]) for t in blocks]
 
-        header_image = _header_image(cat)
-        for text in _format_category_messages(cat, cat_items):
+        sent_banner: str | None = None
+        for text, banner_keys in blocks:
+            # Баннер идёт отдельным сообщением перед блоком, его message_id
+            # попадает в тот же список — при следующей публикации он удалится
+            # вместе с прайсом, и картинки не будут копиться в канале.
+            found = banners.resolve(banner_keys)
+            if found and found[0] != sent_banner:
+                banner_id = await _send_banner(bot, found)
+                if banner_id:
+                    new_ids.append(banner_id)
+                    sent_banner = found[0]
+
             try:
-                msg = await _send_block(bot, text, header_image)
+                msg = await _send_block(bot, text)
                 new_ids.append(msg.message_id)
             except Exception as e:
                 incidents.report(

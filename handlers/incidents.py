@@ -212,76 +212,105 @@ async def cmd_banner_photo(message: types.Message):
     """
     Сохраняет присланное фото как шапку блока прайса.
 
-    Владелец отправляет фото с подписью «/banner mac» — и всё. Картинку
-    не нужно никуда загружать: Telegram хранит её сам, а бот запоминает
-    идентификатор файла, который не протухает.
+    Способ на случай, когда коммитить картинку неудобно. Учти: фото
+    останется видимым в том чате, куда его отправили. Если это нежелательно,
+    лучше положить файл в assets/banners в репозитории — тогда он никуда
+    не публикуется.
     """
     if not _is_owner(message):
         return
 
     parts = (message.caption or "").split()
-    category = parts[1].lower() if len(parts) > 1 else ""
+    key = banners.slug(parts[1]) if len(parts) > 1 else ""
 
-    if category not in banners.CATEGORIES:
+    if not key:
         await message.answer(
-            "Укажи категорию в подписи к фото: <code>/banner mac</code>\n\n"
-            "Доступны: " + ", ".join(f"<code>{c}</code>" for c in banners.CATEGORIES),
+            "Укажи ключ в подписи к фото: <code>/banner macbookair13</code>\n\n"
+            "Частые ключи: " + ", ".join(f"<code>{k}</code>" for k in banners.KNOWN_KEYS),
             parse_mode="HTML",
         )
         return
 
-    # Берём самый крупный размер: Telegram отдаёт лесенку превью
-    file_id = message.photo[-1].file_id
-    banners.save(category, file_id)
-
+    banners.save(key, message.photo[-1].file_id)
     await message.answer(
-        f"✅ Баннер для <b>{category}</b> сохранён.\n"
-        f"Он появится над блоком при следующей публикации прайса.\n\n"
-        f"<i>Проверить: /banners · убрать: /banner_off {category}</i>",
+        f"✅ Баннер <b>{_esc(key)}</b> сохранён — появится над блоком "
+        f"при следующей публикации.\n\n"
+        f"<i>Что стоит: /banners · убрать: /banner_off {_esc(key)}</i>",
         parse_mode="HTML",
     )
 
 
 @router.message(Command("banners"))
 async def cmd_banners(message: types.Message):
-    """Показывает, для каких категорий баннеры уже заданы."""
+    """Показывает все баннеры и откуда каждый берётся."""
     if not _is_owner(message):
         return
 
-    saved = banners.all_banners()
-    lines = ["<b>🖼 Баннеры прайса</b>", ""]
-    for cat in banners.CATEGORIES:
-        mark = "✅" if cat in saved else "—"
-        lines.append(f"{mark} {cat}")
-    lines += [
-        "",
-        "<i>Поставить: отправь фото с подписью</i> <code>/banner mac</code>",
-        "<i>Убрать:</i> <code>/banner_off mac</code>",
-    ]
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    assets = banners.list_assets()
+    ids = banners.all_file_ids()
 
-    for cat, file_id in saved.items():
+    lines = ["<b>🖼 Баннеры прайса</b>", ""]
+
+    if assets:
+        lines.append("<b>Из репозитория</b> <i>(assets/banners)</i>")
+        for k in assets:
+            lines.append(f"  📁 <code>{_esc(k)}</code>")
+        lines.append("")
+    if ids:
+        lines.append("<b>Присланы боту</b>")
+        for k in ids:
+            lines.append(f"  📨 <code>{_esc(k)}</code>")
+        lines.append("")
+    if not assets and not ids:
+        lines.append("Пока ни одного.\n")
+
+    lines += [
+        "<b>Как поставить</b>",
+        "Положить файл <code>assets/banners/macbookair13.jpg</code> "
+        "в репозиторий и сделать git pull на сервере — картинка нигде "
+        "не публикуется.",
+        "",
+        "Либо отправить сюда фото с подписью <code>/banner macbookair13</code>.",
+        "",
+        "<b>Ключи блоков:</b> " + ", ".join(
+            f"<code>{k}</code>" for k in banners.KNOWN_KEYS[:6]
+        ),
+        "<i>Для блока ищется свой ключ, затем общий: "
+        "macbookair13 → macbookair → mac</i>",
+    ]
+
+    await message.answer("\n".join(lines)[:4000], parse_mode="HTML")
+
+    for key, file_id in ids.items():
         try:
-            await message.answer_photo(file_id, caption=f"Текущий баннер: {cat}")
+            await message.answer_photo(file_id, caption=f"Баннер: {key}")
         except Exception:
-            await message.answer(f"⚠️ Баннер «{cat}» не открывается — переустанови его.")
+            await message.answer(f"⚠️ Баннер «{key}» не открывается — переустанови.")
 
 
 @router.message(Command("banner_off"))
 async def cmd_banner_off(message: types.Message, command: CommandObject):
-    """Убирает баннер категории."""
+    """Убирает баннер, присланный боту. Файлы в репозитории не трогает."""
     if not _is_owner(message):
         return
 
-    category = (command.args or "").strip().lower()
-    if not category:
-        await message.answer("Укажи категорию: <code>/banner_off mac</code>", parse_mode="HTML")
+    key = banners.slug((command.args or "").strip())
+    if not key:
+        await message.answer(
+            "Укажи ключ: <code>/banner_off macbookair13</code>", parse_mode="HTML"
+        )
         return
 
-    if banners.remove(category):
-        await message.answer(f"✅ Баннер «{category}» убран.")
+    if banners.remove(key):
+        await message.answer(f"✅ Баннер «{_esc(key)}» убран.", parse_mode="HTML")
+    elif banners.asset_path(key):
+        await message.answer(
+            f"Баннер «{_esc(key)}» лежит файлом в репозитории — "
+            f"удаляется вместе с файлом, не командой.",
+            parse_mode="HTML",
+        )
     else:
-        await message.answer(f"Для «{_esc(category)}» баннера и не было.", parse_mode="HTML")
+        await message.answer(f"Баннера «{_esc(key)}» и не было.", parse_mode="HTML")
 
 
 @router.message(Command("banner"))
@@ -290,11 +319,15 @@ async def cmd_banner_help(message: types.Message):
     if not _is_owner(message):
         return
     await message.answer(
-        "Чтобы поставить картинку над блоком прайса — "
-        "<b>отправь сюда фото</b> и напиши в подписи к нему "
-        "<code>/banner mac</code>.\n\n"
-        "Никуда загружать не нужно, ссылка не потребуется.\n\n"
-        "Категории: " + ", ".join(f"<code>{c}</code>" for c in banners.CATEGORIES) +
+        "<b>Картинка над блоком прайса</b>\n\n"
+        "<b>Способ 1 — файл в репозитории (не публикуется нигде):</b>\n"
+        "положи картинку в <code>assets/banners/</code> с именем-ключом, "
+        "например <code>macbookair13.jpg</code>, закоммить и сделай "
+        "git pull на сервере.\n\n"
+        "<b>Способ 2 — прислать боту:</b>\n"
+        "отправь фото и напиши в подписи <code>/banner macbookair13</code>. "
+        "Быстрее, но фото останется видимым в этом чате.\n\n"
+        "<b>Ключи:</b> " + ", ".join(f"<code>{k}</code>" for k in banners.KNOWN_KEYS[:8]) +
         "\n\n<i>Что уже стоит: /banners</i>",
         parse_mode="HTML",
     )
