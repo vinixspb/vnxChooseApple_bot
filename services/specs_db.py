@@ -64,12 +64,13 @@ _FIELDS: List[tuple] = [
     ("weight_g",        "Вес",               " г"),
     ("dimensions_mm",   "Габариты",          " мм"),
     ("form_factor",     "Форм-фактор",       ""),
+    ("ram_options",     "ОЗУ на выбор",      ""),
 ]
 
 _TEXT_COLS = {
     "chip", "display_tech", "resolution", "body_material", "tele_zoom",
     "video_max", "connector", "sim", "water", "dimensions_mm",
-    "form_factor", "note", "source", "storage_gb", "colors",
+    "form_factor", "note", "source", "storage_gb", "colors", "ram_options",
 }
 
 _SCHEMA = """
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS specs (
     weight_g         INTEGER,
     dimensions_mm    TEXT,
     form_factor      TEXT,
+    ram_options      TEXT,
     storage_gb       TEXT,
     colors           TEXT,
     note             TEXT,
@@ -112,7 +114,7 @@ _COLUMNS = [
     "body_material", "camera_main_mp", "camera_ultra_mp", "camera_tele_mp",
     "tele_zoom", "camera_front_mp", "video_max", "battery_video_h",
     "connector", "sim", "water", "weight_g", "dimensions_mm",
-    "form_factor", "storage_gb", "colors", "note", "source",
+    "form_factor", "ram_options", "storage_gb", "colors", "note", "source",
 ]
 
 _APPLE_PREFIX_RE = re.compile(r"^apple\s+", re.IGNORECASE)
@@ -186,8 +188,12 @@ def rebuild() -> Dict[str, int]:
 
     conn = _connect()
     try:
+        # Таблица создаётся заново, а не очищается: при добавлении нового
+        # поля CREATE TABLE IF NOT EXISTS оставил бы старую схему, и вставка
+        # падала бы с «no such column». База целиком выводится из JSON,
+        # поэтому терять при пересоздании нечего.
+        conn.execute("DROP TABLE IF EXISTS specs")
         conn.executescript(_SCHEMA)
-        conn.execute("DELETE FROM specs")
         placeholders = ",".join("?" * len(_COLUMNS))
         conn.executemany(
             f"INSERT OR REPLACE INTO specs ({','.join(_COLUMNS)}) VALUES ({placeholders})",
@@ -248,12 +254,30 @@ def find(model_name: str) -> Optional[Dict[str, Any]]:
     if not key:
         return None
 
-    # Короткое имя без слова iPhone: «Duo», «SE», «Air».
-    # Владелец пишет /specs Duo, а в базе ключ iphoneduo.
+    # Короткое имя без слова iPhone: «Duo», «SE», «SE 2022», «Air».
+    # Подставляем семейство к УЖЕ нормализованному ключу, а не к сырой
+    # строке: у «Apple SE 2022» префикс Apple снимается при нормализации,
+    # и склейка «iPhone Apple SE 2022» дала бы бессмысленный ключ.
+    candidates = [key]
     if not key.startswith("iphone"):
-        by_family = get("iPhone " + model_name)
-        if by_family:
-            return by_family
+        candidates.append("iphone" + key)
+
+    for cand in candidates:
+        row = _by_key(cand)
+        if row:
+            return row
+    return None
+
+
+def _by_key(key: str) -> Optional[Dict[str, Any]]:
+    """
+    Самый длинный ключ, с которого начинается запрос.
+
+    Длиннейший, а не первый попавшийся: «iphone16promax» начинается и
+    с «iphone16», и с «iphone16pro», и с «iphone16promax» — верен последний.
+    Так же ловятся маковские группы «MacBook Air 15 (2026) M5 16/», где
+    хвост «16/» — это ОЗУ конкретной позиции, а не часть имени модели.
+    """
     try:
         conn = _connect()
         try:
@@ -261,7 +285,7 @@ def find(model_name: str) -> Optional[Dict[str, Any]]:
         finally:
             conn.close()
     except Exception as e:
-        logger.error(f"specs_db.find({model_name}): {e}")
+        logger.error(f"specs_db._by_key({key}): {e}")
         return None
 
     best = None
@@ -290,21 +314,49 @@ def all_models() -> List[Dict[str, Any]]:
 # Поля, осмысленные не для каждой модели: их пустота — не пробел в данных.
 # form_factor заполняется только у необычных корпусов (складной Duo),
 # иначе он числился бы «пропуском» у всех остальных моделей и зашумлял отчёт.
-_OPTIONAL_FIELDS = {"form_factor"}
+_OPTIONAL_FIELDS = {"form_factor", "ram_options"}
 
 
 def _gap_fields() -> List[tuple]:
     return [(f, label, u) for f, label, u in _FIELDS if f not in _OPTIONAL_FIELDS]
 
 
+# «Такой характеристики у модели нет» — это ЗНАНИЕ, а не пробел.
+# У iPhone 13 нет телефото, у SE нет сверхширокоугольной. Раньше пустое
+# поле означало и «не знаем», и «нету», поэтому отчёт о пропусках кричал
+# о четырнадцати моделях, где всё было в порядке, а ассистент отвечал
+# «уточню у Андрея» на вопрос, ответ на который очевиден.
+#
+# Теперь 0 или «нет» в данных означает осознанное отсутствие: в пропуски
+# не попадает, а ассистенту сообщается прямо — «без телефото».
+_ABSENT = (0, "0", "нет", "none", "-")
+
+
+def is_absent(value: Any) -> bool:
+    return value in _ABSENT
+
+
+def _unknown(value: Any) -> bool:
+    """Настоящий пробел: не знаем. Отсутствие по конструкции сюда не входит."""
+    return value in (None, "")
+
+
 def filled_fields(row: Dict[str, Any]) -> int:
-    """Сколько характеристик реально заполнено — для отчётов о полноте."""
-    return sum(1 for f, _, _ in _gap_fields() if row.get(f) not in (None, ""))
+    """Сколько характеристик известно — включая осознанные «нет»."""
+    return sum(1 for f, _, _ in _gap_fields() if not _unknown(row.get(f)))
 
 
 def missing_fields(row: Dict[str, Any]) -> List[str]:
-    """Названия незаполненных характеристик, без необязательных."""
-    return [label for f, label, _ in _gap_fields() if row.get(f) in (None, "")]
+    """Названия характеристик, которых мы не знаем."""
+    out = []
+    for f, label, _ in _gap_fields():
+        # Фиксированного ОЗУ у Mac нет — есть конфигурации на выбор,
+        # и они заполнены. Это ответ, а не пробел.
+        if f == "ram_gb" and row.get("ram_options"):
+            continue
+        if _unknown(row.get(f)):
+            out.append(label)
+    return out
 
 
 # ── Форматирование ───────────────────────────────────────────────────────────
@@ -321,7 +373,24 @@ def format_card(row: Dict[str, Any]) -> str:
 
     for field, label, unit in _FIELDS:
         v = row.get(field)
-        if v in (None, ""):
+
+        # ОЗУ на выбор хранится списком — печатаем по-человечески
+        if field == "ram_options" and v:
+            try:
+                lines.append("· " + label + ": " + "/".join(f"{o}" for o in json.loads(v)) + " ГБ")
+            except Exception:
+                pass
+            continue
+
+        # У Mac фиксированного ОЗУ нет — есть конфигурации.
+        # Не показываем пустую строку там, где ответ дан строкой выше.
+        if field == "ram_gb" and _unknown(v) and row.get("ram_options"):
+            continue
+
+        if _unknown(v):
+            continue
+        if is_absent(v):
+            lines.append(f"· {label}: нет")
             continue
         lines.append(f"· {label}: {_fmt_value(field, v, unit)}")
 
@@ -365,29 +434,52 @@ def format_for_prompt(row: Dict[str, Any]) -> str:
     Только заполненные поля — пустые не упоминаем, чтобы модели
     нечего было «дополнить» по смыслу.
     """
+    def has(field: str) -> bool:
+        v = row.get(field)
+        return not _unknown(v) and not is_absent(v)
+
     parts = []
-    if row.get("chip"):            parts.append(f"чип {row['chip']}")
-    if row.get("ram_gb"):          parts.append(f"ОЗУ {row['ram_gb']}ГБ")
-    if row.get("display_inches"):
+    if has("chip"):            parts.append(f"чип {row['chip']}")
+    if has("ram_gb"):          parts.append(f"ОЗУ {row['ram_gb']}ГБ")
+    if row.get("ram_options"):
+        try:
+            opts = json.loads(row["ram_options"])
+            parts.append("ОЗУ на выбор " + "/".join(f"{o}ГБ" for o in opts))
+        except Exception:
+            pass
+    if has("display_inches"):
         d = f"экран {row['display_inches']}\""
-        if row.get("refresh_hz"):  d += f" {row['refresh_hz']}Гц"
-        if row.get("display_tech"): d += f" {row['display_tech']}"
+        if has("refresh_hz"):   d += f" {row['refresh_hz']}Гц"
+        if has("display_tech"): d += f" {row['display_tech']}"
         parts.append(d)
-    if row.get("body_material"):   parts.append(f"корпус {row['body_material']}")
+    if has("body_material"):   parts.append(f"корпус {row['body_material']}")
 
+    # Отсутствие камеры проговариваем прямо: это ответ на вопрос
+    # «есть ли оптический зум», а не повод отвечать «уточню».
     cams = []
-    if row.get("camera_main_mp"):  cams.append(f"осн {row['camera_main_mp']}Мп")
-    if row.get("camera_ultra_mp"): cams.append(f"ширик {row['camera_ultra_mp']}Мп")
-    if row.get("camera_tele_mp"):  cams.append(f"теле {row['camera_tele_mp']}Мп")
-    if row.get("tele_zoom"):       cams.append(f"зум {row['tele_zoom']}")
-    if cams:                       parts.append("камеры: " + ", ".join(cams))
-    if row.get("camera_front_mp"): parts.append(f"фронт {row['camera_front_mp']}Мп")
+    if is_absent(row.get("camera_main_mp")):
+        # Ноутбуки и наушники: основной камеры нет вовсе. Перечислять при
+        # этом отсутствие телефото и зума бессмысленно — хватит одного факта.
+        cams.append("основной камеры НЕТ")
+    else:
+        if has("camera_main_mp"):  cams.append(f"осн {row['camera_main_mp']}Мп")
+        if has("camera_ultra_mp"): cams.append(f"ширик {row['camera_ultra_mp']}Мп")
+        elif is_absent(row.get("camera_ultra_mp")): cams.append("сверхширокоугольной НЕТ")
+        if has("camera_tele_mp"):  cams.append(f"теле {row['camera_tele_mp']}Мп")
+        elif is_absent(row.get("camera_tele_mp")):  cams.append("телефото НЕТ")
+        if has("tele_zoom"):       cams.append(f"зум {row['tele_zoom']}")
+        elif is_absent(row.get("tele_zoom")):       cams.append("оптического зума НЕТ")
+    if cams:                   parts.append("камеры: " + ", ".join(cams))
+    if has("camera_front_mp"): parts.append(f"фронт {row['camera_front_mp']}Мп")
 
-    if row.get("battery_video_h"): parts.append(f"видео {row['battery_video_h']}ч")
-    if row.get("weight_g"):        parts.append(f"вес {row['weight_g']}г")
-    if row.get("connector"):       parts.append(row["connector"])
-    if row.get("water"):           parts.append(row["water"])
-    if row.get("year"):            parts.append(str(row["year"]))
+    if has("battery_video_h"): parts.append(f"видео {row['battery_video_h']}ч")
+    if has("weight_g"):        parts.append(f"вес {row['weight_g']}г")
+    if has("connector"):       parts.append(f"разъём {row['connector']}")
+    # Отсутствие рейтинга подписываем: голое «нет» в строке нечитаемо
+    if has("water"):           parts.append(f"защита {row['water']}")
+    if has("sim"):             parts.append(f"SIM: {row['sim']}")
+    elif is_absent(row.get("sim")): parts.append("сотовой связи НЕТ")
+    if has("year"):            parts.append(str(row["year"]))
 
     return f"{row['model']}: " + "; ".join(parts) if parts else f"{row['model']}: данных нет"
 

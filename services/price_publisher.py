@@ -44,6 +44,85 @@ def _get_category(item: Dict) -> str:
     return "other"
 
 
+# ── Mac: раскладка по линейкам ───────────────────────────────────────────────
+# Раньше все маки шли одной кучей, отсортированной по алфавиту: «Air 13 (2024)
+# M3 24/», «Air 13 (2024) M3 8/», «Air 13 (2025) M4 16/», между ними Pro 16 и
+# Pro 14. Выбрать по такому списку невозможно.
+#
+# Покупатель сначала определяется с РАЗМЕРОМ («большой не хочу»), и только
+# потом сравнивает процессоры и цены. Поэтому размер — верхний уровень:
+# отдельный пост на MacBook Air 13″, отдельный на 15″, внутри блоки по
+# процессорам от старого к новому.
+#
+# Хвост «16/» в названии группы — это ОЗУ: парсер режет строку по объёму
+# диска, и «16/1tb» распадается на «16/» в имени модели и «1TB» в памяти.
+# Разбираем обратно и показываем как «16/1TB».
+
+_MAC_RAM_TAIL_RE = re.compile(r"\s(\d{1,2})\s*/\s*$")
+_MAC_YEAR_RE     = re.compile(r"\((\d{4})\)")
+_MAC_CHIP_RE     = re.compile(r"\bM(\d)\b\s*(Pro|Max|Ultra)?", re.IGNORECASE)
+
+# Ссылка на картинку-шапку блока Mac. Задаётся в .env или в листе Settings
+# ключом MAC_HEADER_IMAGE. Пусто — пост выходит без картинки.
+_MAC_HEADER_IMAGE = os.getenv("MAC_HEADER_IMAGE", "")
+
+_CHIP_TIER = {"": 0, "pro": 1, "max": 2, "ultra": 3}
+
+
+def _mac_split_ram(group_name: str) -> tuple[str, str]:
+    """«MacBook Air 13 (2026) M5 16/» → («MacBook Air 13 (2026) M5», «16»)."""
+    m = _MAC_RAM_TAIL_RE.search(group_name)
+    if m:
+        return group_name[: m.start()].strip(), m.group(1)
+    return group_name.strip(), ""
+
+
+def _mac_line(group_name: str) -> str:
+    """Линейка и размер — верхний уровень выбора: «MacBook Air 13″»."""
+    t = group_name.lower()
+    m = re.search(r"macbook\s+(air|pro|neo)\s*(\d{2})", t)
+    if m:
+        kind = {"air": "Air", "pro": "Pro", "neo": "Neo"}[m.group(1)]
+        return f"MacBook {kind} {m.group(2)}″"
+    if "imac" in t:                  return "iMac"
+    if re.search(r"mac\s*mini", t):  return "Mac mini"
+    if re.search(r"mac\s*studio", t): return "Mac Studio"
+    if re.search(r"mac\s*pro", t):   return "Mac Pro"
+    if "macbook" in t:               return "MacBook"
+    return "Mac"
+
+
+def _mac_chip(group_name: str) -> str:
+    """«MacBook Pro 16 (2026) M5 Pro» → «M5 Pro»."""
+    m = _MAC_CHIP_RE.search(group_name)
+    if not m:
+        return ""
+    suffix = f" {m.group(2).capitalize()}" if m.group(2) else ""
+    return f"M{m.group(1)}{suffix}"
+
+
+def _mac_chip_sort(chip: str) -> tuple:
+    """M3 < M4 < M5 < M5 Pro < M5 Max. Без чипа — в конец."""
+    m = re.match(r"M(\d)(?:\s+(\w+))?", chip)
+    if not m:
+        return (99, 0)
+    return (int(m.group(1)), _CHIP_TIER.get((m.group(2) or "").lower(), 0))
+
+
+def _mac_line_sort(line: str) -> tuple:
+    """Air перед Pro, внутри — по возрастанию диагонали."""
+    order = {"Air": 0, "Neo": 1, "Pro": 2}
+    m = re.match(r"MacBook (Air|Neo|Pro) (\d{2})", line)
+    if m:
+        return (0, order.get(m.group(1), 3), int(m.group(2)))
+    return (1, 0, 0)
+
+
+def _mac_year(group_name: str) -> int:
+    m = _MAC_YEAR_RE.search(group_name)
+    return int(m.group(1)) if m else 0
+
+
 def _fmt_price(price: str | int) -> str:
     try:
         return f"{int(price):,}".replace(",", " ")
@@ -212,8 +291,94 @@ def _pack_chunks(date_str: str, blocks: List[str], sep: str) -> List[str]:
     ]
 
 
+def _format_mac_messages(items: List[Dict]) -> List[str]:
+    """
+    Отдельное сообщение на каждую линейку Mac, внутри — блоки по процессорам.
+
+    Внутри блока сортировка по ОЗУ, затем по диску, затем по цвету: человек
+    уже выбрал размер и процессор, дальше он сравнивает конфигурации и цену.
+    """
+    date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+
+    # Раскладываем: линейка → процессор → позиции
+    lines: Dict[str, Dict[str, List[Dict]]] = defaultdict(lambda: defaultdict(list))
+    for item in items:
+        raw_group = item.get("item_group_id", "Mac")
+        clean, ram = _mac_split_ram(raw_group)
+        entry = dict(item)
+        entry["_clean_group"] = clean
+        entry["_ram"] = ram
+        lines[_mac_line(clean)][_mac_chip(clean) or "—"].append(entry)
+
+    messages: List[str] = []
+    for line in sorted(lines, key=_mac_line_sort):
+        chips = lines[line]
+        blocks: List[str] = []
+
+        for chip in sorted(chips, key=_mac_chip_sort):
+            rows = sorted(
+                chips[chip],
+                key=lambda x: (
+                    int(x["_ram"]) if x["_ram"].isdigit() else 0,
+                    _memory_gb(x.get("memory", "")),
+                    x.get("color", ""),
+                ),
+            )
+
+            years = sorted({_mac_year(r["_clean_group"]) for r in rows if _mac_year(r["_clean_group"])})
+            year_str = f" · {'/'.join(str(y) for y in years)}" if years else ""
+
+            body = []
+            for r in rows:
+                ram  = r["_ram"]
+                mem  = r.get("memory", "-")
+                spec = f"{ram}/{mem}" if ram and mem != "-" else (mem if mem != "-" else f"{ram} ГБ ОЗУ")
+                color = r.get("color", "-")
+                price = _fmt_price(r.get("price", "0"))
+                parts = [p for p in [spec, color] if p and p != "-"]
+                body.append(f"└ {' | '.join(parts)} — {price} ₽")
+
+            # Размер уже в заголовке поста — в блоке остаётся семейство и чип
+            family = re.sub(r"\s*\d{2}″$", "", line)
+            blocks.append(
+                f"💻 <b>{family} {chip}</b>{year_str}\n"
+                f"<blockquote expandable>{chr(10).join(body)}</blockquote>"
+            )
+
+        header = f"🍏 <b>Актуальный прайс — {date_str}</b>\n🆕 <b>{line}</b> 🆕"
+        for chunk in _pack_blocks(header, blocks):
+            messages.append(chunk)
+
+    return messages
+
+
+def _pack_blocks(header: str, blocks: List[str]) -> List[str]:
+    """Пакует блоки под лимит Telegram, нумеруя части только при разбиении."""
+    chunks: List[str] = []
+    current: List[str] = []
+    current_len = len(header)
+    for block in blocks:
+        if current and current_len + len(block) + 2 > _MAX_MSG_LEN:
+            chunks.append("\n\n".join(current))
+            current, current_len = [], len(header)
+        current.append(block)
+        current_len += len(block) + 2
+    if current:
+        chunks.append("\n\n".join(current))
+
+    total = len(chunks)
+    out = []
+    for i, body in enumerate(chunks, start=1):
+        head = header if total == 1 else f"{header} ({i}/{total})"
+        out.append(f"{head}\n\n{body}")
+    return out
+
+
 def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
+
+    if category == "mac":
+        return _format_mac_messages(items)
 
     if category in _GROUPED_CATEGORIES:
         group_emoji = _GROUP_EMOJI.get(category, "")
@@ -269,6 +434,60 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[str]:
     return _pack_chunks(date_str, lines, sep="\n")
 
 
+def _header_image(category: str) -> str:
+    """
+    Картинка-шапка для категории. Берётся из листа Settings, иначе из .env.
+
+    Через Settings — чтобы менять баннер без правки кода и перезапуска бота.
+    """
+    try:
+        import services.data_store as store
+        from_settings = str(store.SETTINGS.get(f"{category.upper()}_HEADER_IMAGE", "")).strip()
+        if from_settings:
+            return from_settings
+    except Exception:
+        pass
+    if category == "mac":
+        return _MAC_HEADER_IMAGE
+    return os.getenv(f"{category.upper()}_HEADER_IMAGE", "")
+
+
+async def _send_block(bot: Bot, text: str, image_url: str = ""):
+    """
+    Отправляет блок прайса, при наличии ссылки — с картинкой над текстом.
+
+    Картинка идёт превью ссылки с флагом show_above_text, а не отдельным
+    фото с подписью: у подписи к фото лимит 1024 символа, в него прайс
+    не помещается, да и разбивать список на фото и текст неудобно читать.
+    Флаг появился в Bot API 7.0; на старом aiogram аккуратно откатываемся
+    к обычному сообщению, чтобы публикация не сорвалась из-за баннера.
+    """
+    if image_url:
+        try:
+            from aiogram.types import LinkPreviewOptions
+            return await bot.send_message(
+                PRICE_CHANNEL_ID,
+                text,
+                parse_mode="HTML",
+                disable_notification=True,
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=False,
+                    url=image_url,
+                    prefer_large_media=True,
+                    show_above_text=True,
+                ),
+            )
+        except (ImportError, TypeError) as e:
+            logger.warning(f"price_publisher: баннер не поддержан этой версией aiogram ({e})")
+
+    return await bot.send_message(
+        PRICE_CHANNEL_ID,
+        text,
+        parse_mode="HTML",
+        disable_notification=True,
+    )
+
+
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     """
     Publishes items grouped by category in fixed order (iPhone last = most visible).
@@ -289,14 +508,10 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
         cat_items = by_category.get(cat, [])
         if not cat_items:
             continue
+        header_image = _header_image(cat)
         for text in _format_category_messages(cat, cat_items):
             try:
-                msg = await bot.send_message(
-                    PRICE_CHANNEL_ID,
-                    text,
-                    parse_mode="HTML",
-                    disable_notification=True,
-                )
+                msg = await _send_block(bot, text, header_image)
                 new_ids.append(msg.message_id)
             except Exception as e:
                 incidents.report(

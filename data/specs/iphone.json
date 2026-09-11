@@ -22,8 +22,16 @@
     "water": null,
     "weight_g": null,
     "dimensions_mm": null,
-    "storage_gb": [256, 512, 1024, 2048],
-    "colors": ["Star White", "Night Sky"],
+    "storage_gb": [
+      256,
+      512,
+      1024,
+      2048
+    ],
+    "colors": [
+      "Star White",
+      "Night Sky"
+    ],
     "form_factor": "Складной",
     "source": "newsroom",
     "note": "Анонс 09.09.2026. Заполнены только подтверждённые поля — остальное требует сверки со страницей характеристик Apple."
@@ -79,7 +87,12 @@
     "water": "IP68",
     "weight_g": 233,
     "dimensions_mm": "163.4×78.0×8.75",
-    "storage_gb": [256, 512, 1024, 2048],
+    "storage_gb": [
+      256,
+      512,
+      1024,
+      2048
+    ],
     "source": "seed"
   },
   {
@@ -105,7 +118,11 @@
     "water": "IP68",
     "weight_g": 204,
     "dimensions_mm": "150.0×71.9×8.75",
-    "storage_gb": [256, 512, 1024],
+    "storage_gb": [
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -120,8 +137,8 @@
     "brightness_nits": 3000,
     "body_material": "Титан",
     "camera_main_mp": 48,
-    "camera_ultra_mp": null,
-    "camera_tele_mp": null,
+    "camera_ultra_mp": 0,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 18,
     "video_max": "4K 60 fps Dolby Vision",
@@ -131,7 +148,11 @@
     "water": "IP68",
     "weight_g": 165,
     "dimensions_mm": "156.2×74.7×5.64",
-    "storage_gb": [256, 512, 1024],
+    "storage_gb": [
+      256,
+      512,
+      1024
+    ],
     "note": "Самый тонкий iPhone — 5.64 мм. Одна камера.",
     "source": "seed"
   },
@@ -148,7 +169,7 @@
     "body_material": "Алюминий",
     "camera_main_mp": 48,
     "camera_ultra_mp": 48,
-    "camera_tele_mp": null,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 18,
     "video_max": "4K 60 fps Dolby Vision",
@@ -158,7 +179,10 @@
     "water": "IP68",
     "weight_g": 177,
     "dimensions_mm": "149.6×71.5×7.95",
-    "storage_gb": [256, 512],
+    "storage_gb": [
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -184,7 +208,11 @@
     "water": "IP68",
     "weight_g": 227,
     "dimensions_mm": "163.0×77.6×8.25",
-    "storage_gb": [256, 512, 1024],
+    "storage_gb": [
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -210,7 +238,12 @@
     "water": "IP68",
     "weight_g": 199,
     "dimensions_mm": "149.6×71.5×8.25",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -226,7 +259,7 @@
     "body_material": "Алюминий",
     "camera_main_mp": 48,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 12,
     "video_max": "4K 60 fps Dolby Vision",
@@ -236,7 +269,11 @@
     "water": "IP68",
     "weight_g": 199,
     "dimensions_mm": "160.9×77.8×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -252,7 +289,7 @@
     "body_material": "Алюминий",
     "camera_main_mp": 48,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 12,
     "video_max": "4K 60 fps Dolby Vision",
@@ -262,7 +299,11 @@
     "water": "IP68",
     "weight_g": 170,
     "dimensions_mm": "147.6×71.6×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -277,8 +318,8 @@
     "brightness_nits": 1200,
     "body_material": "Алюминий",
     "camera_main_mp": 48,
-    "camera_ultra_mp": null,
-    "camera_tele_mp": null,
+    "camera_ultra_mp": 0,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
@@ -288,7 +329,11 @@
     "water": "IP68",
     "weight_g": 167,
     "dimensions_mm": "146.7×71.5×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "note": "Первый iPhone с собственным модемом Apple C1. Одна камера, без MagSafe.",
     "source": "seed"
   },
@@ -315,7 +360,11 @@
     "water": "IP68",
     "weight_g": 221,
     "dimensions_mm": "159.9×76.7×8.25",
-    "storage_gb": [256, 512, 1024],
+    "storage_gb": [
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -341,7 +390,12 @@
     "water": "IP68",
     "weight_g": 187,
     "dimensions_mm": "146.6×70.6×8.25",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -357,7 +411,7 @@
     "body_material": "Алюминий",
     "camera_main_mp": 48,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
@@ -367,7 +421,11 @@
     "water": "IP68",
     "weight_g": 201,
     "dimensions_mm": "160.9×77.8×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -383,7 +441,7 @@
     "body_material": "Алюминий",
     "camera_main_mp": 48,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
+    "camera_tele_mp": 0,
     "tele_zoom": "2x оптическое качество (кроп)",
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
@@ -393,7 +451,11 @@
     "water": "IP68",
     "weight_g": 171,
     "dimensions_mm": "147.6×71.6×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "note": "Первый базовый iPhone с USB-C и Dynamic Island.",
     "source": "seed"
   },
@@ -420,7 +482,12 @@
     "water": "IP68",
     "weight_g": 240,
     "dimensions_mm": "160.7×77.6×7.85",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -446,7 +513,12 @@
     "water": "IP68",
     "weight_g": 206,
     "dimensions_mm": "147.5×71.5×7.85",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "note": "Первый iPhone с Dynamic Island.",
     "source": "seed"
   },
@@ -463,8 +535,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
     "battery_video_h": 26,
@@ -473,7 +545,11 @@
     "water": "IP68",
     "weight_g": 203,
     "dimensions_mm": "160.8×78.1×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -489,8 +565,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
     "battery_video_h": 20,
@@ -499,7 +575,11 @@
     "water": "IP68",
     "weight_g": 172,
     "dimensions_mm": "146.7×71.5×7.80",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -525,7 +605,12 @@
     "water": "IP68",
     "weight_g": 240,
     "dimensions_mm": "160.8×78.1×7.65",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -551,7 +636,12 @@
     "water": "IP68",
     "weight_g": 204,
     "dimensions_mm": "146.7×71.5×7.65",
-    "storage_gb": [128, 256, 512, 1024],
+    "storage_gb": [
+      128,
+      256,
+      512,
+      1024
+    ],
     "source": "seed"
   },
   {
@@ -567,8 +657,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
     "battery_video_h": 17,
@@ -577,7 +667,11 @@
     "water": "IP68",
     "weight_g": 141,
     "dimensions_mm": "131.5×64.2×7.65",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -593,8 +687,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
     "battery_video_h": 19,
@@ -603,7 +697,11 @@
     "water": "IP68",
     "weight_g": 174,
     "dimensions_mm": "146.7×71.5×7.65",
-    "storage_gb": [128, 256, 512],
+    "storage_gb": [
+      128,
+      256,
+      512
+    ],
     "source": "seed"
   },
   {
@@ -619,8 +717,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps Dolby Vision",
     "battery_video_h": 17,
@@ -629,7 +727,11 @@
     "water": "IP68",
     "weight_g": 164,
     "dimensions_mm": "146.7×71.5×7.40",
-    "storage_gb": [64, 128, 256],
+    "storage_gb": [
+      64,
+      128,
+      256
+    ],
     "note": "Первый iPhone с MagSafe.",
     "source": "seed"
   },
@@ -646,8 +748,8 @@
     "body_material": "Алюминий",
     "camera_main_mp": 12,
     "camera_ultra_mp": 12,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 12,
     "video_max": "4K 60 fps",
     "battery_video_h": 17,
@@ -656,7 +758,11 @@
     "water": "IP68",
     "weight_g": 194,
     "dimensions_mm": "150.9×75.7×8.30",
-    "storage_gb": [64, 128, 256],
+    "storage_gb": [
+      64,
+      128,
+      256
+    ],
     "source": "seed"
   },
   {
@@ -671,9 +777,9 @@
     "brightness_nits": 625,
     "body_material": "Алюминий и стекло",
     "camera_main_mp": 12,
-    "camera_ultra_mp": null,
-    "camera_tele_mp": null,
-    "tele_zoom": null,
+    "camera_ultra_mp": 0,
+    "camera_tele_mp": 0,
+    "tele_zoom": 0,
     "camera_front_mp": 7,
     "video_max": "4K 60 fps",
     "battery_video_h": 15,
@@ -682,7 +788,11 @@
     "water": "IP67",
     "weight_g": 144,
     "dimensions_mm": "138.4×67.3×7.30",
-    "storage_gb": [64, 128, 256],
+    "storage_gb": [
+      64,
+      128,
+      256
+    ],
     "note": "Единственный актуальный iPhone с Touch ID в кнопке «Домой».",
     "source": "seed"
   }
