@@ -58,7 +58,11 @@ _ACCESSORY_RE = re.compile(
 # Модель без слова iPhone: поставщики пишут «Apple 11», «Apple 16e»,
 # «Apple 14 Pro Max». Именно из-за этого полсотни айфонов раньше падали
 # в кучу аксессуаров: проверка искала подстроку «iphone», а её там нет.
-_BARE_IPHONE_RE = re.compile(r"^(?:apple\s+)?(\d{1,2})\s*(e\b|pro|plus|max|air|mini|$|\s)", re.IGNORECASE)
+_BARE_IPHONE_RE = re.compile(
+    r"^(?:apple\s+)?(?:"
+    r"(\d{1,2})\s*(?:e\b|pro|plus|max|air|mini|$|\s)"
+    r"|SE\b"          # «SE 2022» — тоже iPhone, просто без номера поколения
+    r")", re.IGNORECASE)
 
 # Целые часы, а не аксессуар к ним. «AW 10 42 Gold Case Gold Milanese Loop» —
 # это часы в сборе: Case здесь означает корпус, а не защитный чехол.
@@ -197,7 +201,7 @@ def _display_group(category: str, group_name: str) -> str:
     Возвращаем слово iPhone на место: покупателю «11» ни о чём не говорит.
     """
     name = str(group_name).strip()
-    if category == "iphone" and re.match(r"^\d", name):
+    if category == "iphone" and "iphone" not in name.lower():
         return f"iPhone {name}"
     return name
 
@@ -699,6 +703,49 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
     return [(t, [category]) for t in _pack_chunks(date_str, lines, sep="\n")]
 
 
+# ── Темп отправки ────────────────────────────────────────────────────────────
+# Telegram пускает в один чат около 20 сообщений в минуту. Публикация теперь
+# шлёт их полтора десятка с баннерами, и на лимите отправка начинала падать —
+# молча терялся ХВОСТ очереди, а в хвосте идут айфоны, самое ценное.
+# Поэтому: пауза между сообщениями и обязательный повтор при flood control.
+_SEND_DELAY = float(os.getenv("PUBLISH_SEND_DELAY", "3.5"))
+_SEND_RETRIES = 3
+
+
+async def _send_throttled(send):
+    """
+    Отправляет с паузой и повтором при ограничении частоты.
+
+    Telegram при flood control сообщает, сколько ждать. Раньше это было
+    обычным исключением: сообщение терялось, публикация шла дальше.
+    Теперь ждём столько, сколько просят, и повторяем — прайс должен
+    доехать целиком, даже если это займёт лишнюю минуту.
+    """
+    import asyncio
+
+    for attempt in range(_SEND_RETRIES):
+        try:
+            result = await send()
+            await asyncio.sleep(_SEND_DELAY)
+            return result
+        except Exception as e:
+            wait = getattr(e, "retry_after", None)
+            if wait is None:
+                m = re.search(r"retry after (\d+)", str(e), re.IGNORECASE)
+                wait = int(m.group(1)) if m else None
+
+            if wait is None or attempt == _SEND_RETRIES - 1:
+                raise
+
+            logger.warning(
+                f"price_publisher: Telegram просит подождать {wait} с "
+                f"(попытка {attempt + 1} из {_SEND_RETRIES})"
+            )
+            await asyncio.sleep(wait + 1)
+
+    return None
+
+
 async def _send_banner(bot: Bot, found: tuple) -> int | None:
     """
     Отправляет картинку-шапку. Возвращает message_id или None.
@@ -716,10 +763,10 @@ async def _send_banner(bot: Bot, found: tuple) -> int | None:
         else:
             photo = str(value)
 
-        msg = await bot.send_photo(
-            PRICE_CHANNEL_ID, photo, disable_notification=True
+        msg = await _send_throttled(
+            lambda: bot.send_photo(PRICE_CHANNEL_ID, photo, disable_notification=True)
         )
-        return msg.message_id
+        return msg.message_id if msg else None
     except Exception as e:
         # Баннер — украшение. Из-за него публикация прайса падать не должна.
         logger.warning(f"price_publisher: баннер '{key}' не отправлен: {e}")
@@ -727,11 +774,13 @@ async def _send_banner(bot: Bot, found: tuple) -> int | None:
 
 
 async def _send_block(bot: Bot, text: str):
-    return await bot.send_message(
-        PRICE_CHANNEL_ID,
-        text,
-        parse_mode="HTML",
-        disable_notification=True,
+    return await _send_throttled(
+        lambda: bot.send_message(
+            PRICE_CHANNEL_ID,
+            text,
+            parse_mode="HTML",
+            disable_notification=True,
+        )
     )
 
 

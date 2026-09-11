@@ -100,11 +100,26 @@ _MAC_PUB_RE = re.compile(r"\b(macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|mac
                          re.IGNORECASE)
 
 
+# Обломок разбора: в названии модели остался только тип SIM или связи.
+# В канале это выглядело как отдельный товар «📱 eSim — 28 700 ₽»,
+# без памяти и цвета. Такую строку показывать покупателю нельзя:
+# что это за товар, не понимает никто, включая нас.
+_JUNK_GROUP_RE = re.compile(
+    r"^\s*(e-?sim|nano\s*\+?\s*e-?sim|nano\s*\+?\s*nano|nano|wi-?fi|lte|"
+    r"dual\s*sim|sim|-)\s*$",
+    re.IGNORECASE,
+)
+
+
 def _is_apple_product(item: dict) -> bool:
     """
     Returns False for Samsung/Android phones mislabeled as Apple,
     and for non-tech items (T-shirts etc.) that leak in from suppliers.
     """
+    group = str(item.get("item_group_id", "")).strip()
+    if _JUNK_GROUP_RE.match(group):
+        return False
+
     for field in ("item_group_id", "title"):
         val = str(item.get(field, "")).strip()
         if not val:
