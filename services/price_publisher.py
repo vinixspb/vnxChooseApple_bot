@@ -649,6 +649,53 @@ def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tu
     return out
 
 
+def _model_block(items: List[Dict]) -> str:
+    """
+    Содержимое блока одной модели: разделы по SIM, внутри — полки по памяти.
+
+    Так выглядит исходное сообщение поставщика, и так человек выбирает:
+    сначала решает, нужна ли физическая симка, потом сколько памяти,
+    и только в конце смотрит на цвет. Сплошной список из двух десятков
+    строк для этого не годится — в нём не видно границ.
+
+    Разделы: сначала без физического слота (☁️), потом со слотом (📎).
+    Внутри раздела объёмы по возрастанию, между ними пустая строка.
+    """
+    sections: Dict[str, List[Dict]] = defaultdict(list)
+    for item in items:
+        sections[str(item.get("sim", "-")).strip() or "-"].append(item)
+
+    # Единственный раздел без SIM (iPad без связи, старые записи) —
+    # заголовок не нужен, он не несёт информации.
+    hide_headers = len(sections) == 1 and next(iter(sections)) in ("-", "")
+
+    out: List[str] = []
+    for sim in sorted(sections, key=_sim_order):
+        if not hide_headers:
+            label = _fmt_sim_marked(sim)
+            if label:
+                if out:
+                    out.append("")
+                out.append(f"<b>{label}</b>")
+
+        by_memory: Dict[str, List[Dict]] = defaultdict(list)
+        for item in sections[sim]:
+            by_memory[str(item.get("memory", "-")).strip() or "-"].append(item)
+
+        for n, mem in enumerate(sorted(by_memory, key=_memory_gb)):
+            if n:
+                out.append("")          # пустая строка между объёмами
+            for item in sorted(by_memory[mem], key=lambda x: x.get("color", "")):
+                color  = item.get("color", "-")
+                region = _fmt_region(item.get("region", "-"))
+                price  = _fmt_price(item.get("price", "0"))
+                parts  = [p for p in [mem, color, region] if p and p != "-"]
+                spec   = " | ".join(parts) if parts else "—"
+                out.append(f"• {spec} — {price} ₽")
+
+    return "\n".join(out)
+
+
 def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
 
@@ -677,29 +724,10 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
         blocks = []
         for group_name in sorted_groups:
             display_name = _display_group(category, group_name)
-            sorted_items = sorted(
-                groups[group_name],
-                key=lambda x: (
-                    _memory_gb(x.get("memory", "")),
-                    _sim_order(x.get("sim", "")),
-                    x.get("color", ""),
-                ),
-            )
-            block_lines = []
-            for item in sorted_items:
-                mem    = item.get("memory", "-")
-                color  = item.get("color", "-")
-                sim    = _fmt_sim_marked(item.get("sim", "-"))
-                region = _fmt_region(item.get("region", "-"))
-                price  = _fmt_price(item.get("price", "0"))
-                parts  = [p for p in [mem, color, sim, region] if p and p != "-"]
-                spec   = " | ".join(parts) if parts else "—"
-                block_lines.append(f"• {spec} — {price} ₽")
-
             blocks.append((
                 display_name,
                 f"{group_emoji} <b>{display_name}</b>\n"
-                f"<blockquote expandable>{chr(10).join(block_lines)}</blockquote>"
+                f"<blockquote expandable>{_model_block(groups[group_name])}</blockquote>"
             ))
 
         header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"

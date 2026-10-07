@@ -167,6 +167,25 @@ def _infer_sim_from_id(item_id: str) -> str:
     return "-"
 
 
+_ID_MEMORY_RE = re.compile(r"^\d{1,4}(GB|TB)$", re.IGNORECASE)
+
+
+def _infer_memory_from_id(item_id: str) -> str:
+    """
+    Достаёт объём памяти из детерминированного ID.
+
+    ID собирается как APPLEIPHONE18PRO-256GB-ESIM-BLACK, то есть объём
+    в нём есть всегда. Для части строк Sheets возвращает пустое поле
+    memory — и тогда в канале выходило три одинаковых «Black | eSIM»
+    по разным ценам: это 256, 512 и 1 ТБ, но отличить их невозможно,
+    да и сортировка по памяти работать не может.
+    """
+    for part in str(item_id).split("-"):
+        if _ID_MEMORY_RE.match(part.strip()):
+            return part.strip().upper()
+    return "-"
+
+
 def _catalog_items_for_publish() -> list[dict]:
     """
     Full current in-stock catalog, mapped for publish_price().
@@ -188,6 +207,11 @@ def _catalog_items_for_publish() -> list[dict]:
         sim = str(item.get("sim", "")).strip()
         if not sim or sim == "-":
             item["sim"] = _infer_sim_from_id(item.get("id", ""))
+
+        # То же для памяти: без неё строки неразличимы и не сортируются
+        mem = str(item.get("memory", "")).strip()
+        if not mem or mem == "-":
+            item["memory"] = _infer_memory_from_id(item.get("id", ""))
 
         items.append(item)
     return items
