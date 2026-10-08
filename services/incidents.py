@@ -70,6 +70,10 @@ _NOTIFY_LEVELS = {CRITICAL, ERROR, WARNING}
 _BURST_LIMIT = int(os.getenv("INCIDENTS_BURST_LIMIT", "12"))
 _BURST_WINDOW = timedelta(minutes=10)
 
+# Все уведомления беззвучные. Можно вернуть звук критичным — тем, из-за
+# которых магазин стоит, — выставив INCIDENTS_SOUND_ON_CRITICAL=1 в .env.
+_SOUND_ON_CRITICAL = os.getenv("INCIDENTS_SOUND_ON_CRITICAL", "0") == "1"
+
 
 # ── Модель ───────────────────────────────────────────────────────────────────
 
@@ -323,7 +327,8 @@ def _report_unsafe(
         _rotate_if_needed()
 
     if should_notify:
-        _enqueue(_format_alert(inc, repeat=not is_new))
+        silent = not (_SOUND_ON_CRITICAL and inc.severity == CRITICAL)
+        _enqueue(_format_alert(inc, repeat=not is_new), silent=silent)
 
     return inc
 
@@ -415,8 +420,16 @@ def _esc(text: str) -> str:
                      .replace(">", "&gt;"))
 
 
-def _enqueue(text: str) -> None:
-    _OUTBOX.append(text)
+def _enqueue(text: str, silent: bool = True) -> None:
+    """
+    Кладёт уведомление в очередь. По умолчанию беззвучно.
+
+    Инциденты — это телеметрия: она должна ждать в чате, а не выдёргивать
+    звонком. Исключение можно включить для критичных: поломка вроде потери
+    прав на таблицу тихо живёт неделями, и именно её не хотелось бы
+    пролистать вместе с рабочим шумом.
+    """
+    _OUTBOX.append((text, silent))
 
 
 def _format_alert(inc: Incident, repeat: bool = False) -> str:
@@ -481,17 +494,18 @@ async def dispatcher(bot, poll_seconds: int = 5) -> None:
     while True:
         try:
             if owner and _OUTBOX:
-                batch: List[str] = []
+                batch: List[tuple] = []
                 while _OUTBOX and len(batch) < 5:
                     batch.append(_OUTBOX.popleft())
-                for text in batch:
-                    await _send(bot, owner, secretary_token, text)
+                for text, silent in batch:
+                    await _send(bot, owner, secretary_token, text, silent)
         except Exception as e:
             logger.error(f"incidents.dispatcher: {e}")
         await asyncio.sleep(poll_seconds)
 
 
-async def _send(bot, owner: str, secretary_token: Optional[str], text: str) -> None:
+async def _send(bot, owner: str, secretary_token: Optional[str],
+                text: str, silent: bool = True) -> None:
     """
     Шлёт уведомление. Приоритет — секретарский бот (у владельца он под рукой),
     при неудаче падаем на основного бота: сообщение важнее канала доставки.
@@ -501,7 +515,8 @@ async def _send(bot, owner: str, secretary_token: Optional[str], text: str) -> N
             from aiogram import Bot
             sec = Bot(token=secretary_token)
             try:
-                await sec.send_message(owner, text, parse_mode="HTML")
+                await sec.send_message(owner, text, parse_mode="HTML",
+                                       disable_notification=silent)
                 return
             finally:
                 await sec.session.close()
@@ -509,7 +524,8 @@ async def _send(bot, owner: str, secretary_token: Optional[str], text: str) -> N
             logger.warning(f"incidents: секретарь не доставил ({e}), пробуем основного бота")
 
     try:
-        await bot.send_message(owner, text, parse_mode="HTML")
+        await bot.send_message(owner, text, parse_mode="HTML",
+                               disable_notification=silent)
     except Exception as e:
         logger.error(f"incidents: уведомление не доставлено: {e}")
 

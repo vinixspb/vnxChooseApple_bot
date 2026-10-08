@@ -48,16 +48,26 @@ class IsSupplierChat(Filter):
 
 
 async def _notify_owner(bot: Bot, text: str) -> None:
+    """
+    Служебное уведомление владельцу — всегда беззвучно.
+
+    Поставщики присылают прайсы пачками, и на каждое сообщение приходило
+    своё уведомление со звуком. Это рабочая телеметрия, а не событие,
+    ради которого стоит доставать телефон: она должна лежать в чате
+    и ждать, когда на неё посмотрят.
+    """
     if not OWNER_ID:
         return
     if _SECRETARY_TOKEN:
         sec = Bot(token=_SECRETARY_TOKEN)
         try:
-            await sec.send_message(OWNER_ID, text, parse_mode="HTML")
+            await sec.send_message(OWNER_ID, text, parse_mode="HTML",
+                                   disable_notification=True)
         finally:
             await sec.session.close()
     else:
-        await bot.send_message(OWNER_ID, text, parse_mode="HTML")
+        await bot.send_message(OWNER_ID, text, parse_mode="HTML",
+                               disable_notification=True)
 
 
 _APPLE_PREFIX_RE = re.compile(r"^Apple\s+", re.IGNORECASE)
