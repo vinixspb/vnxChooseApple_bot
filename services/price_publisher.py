@@ -434,33 +434,18 @@ def _format_mac_messages(items: List[Dict]) -> List[tuple]:
         blocks: List[str] = []
 
         for chip in sorted(chips, key=_mac_chip_sort):
-            rows = sorted(
-                chips[chip],
-                key=lambda x: (
-                    int(x["_ram"]) if x["_ram"].isdigit() else 0,
-                    _memory_gb(x.get("memory", "")),
-                    x.get("color", ""),
-                ),
-            )
+            rows = chips[chip]
 
             years = sorted({_mac_year(r["_clean_group"]) for r in rows if _mac_year(r["_clean_group"])})
             year_str = f" · {'/'.join(str(y) for y in years)}" if years else ""
 
-            body = []
-            for r in rows:
-                ram  = r["_ram"]
-                mem  = r.get("memory", "-")
-                spec = f"{ram}/{mem}" if ram and mem != "-" else (mem if mem != "-" else f"{ram} ГБ ОЗУ")
-                color = r.get("color", "-")
-                price = _fmt_price(r.get("price", "0"))
-                parts = [p for p in [spec, color] if p and p != "-"]
-                body.append(f"• {' | '.join(parts)} — {price} ₽")
+            body = _mac_chip_block(rows)
 
             # Размер уже в заголовке поста — в блоке остаётся семейство и чип
             family = re.sub(r"\s*\d{2}″$", "", line)
             blocks.append(
                 f"💻 <b>{family} {chip}</b>{year_str}\n"
-                f"<blockquote expandable>{chr(10).join(body)}</blockquote>"
+                f"<blockquote expandable>{body}</blockquote>"
             )
 
         header = f"🍏 <b>Актуальный прайс — {date_str}</b>\n🆕 <b>{line}</b> 🆕"
@@ -603,14 +588,9 @@ def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[t
 
     blocks = []
     for name in sorted(groups, key=sort_key):
-        rows = sorted(groups[name], key=lambda x: (x.get("title") or ""))
-        lines = []
-        for item in rows:
-            title = item.get("title") or item.get("item_group_id", "")
-            price = _fmt_price(item.get("price", "0"))
-            lines.append(f"• {title} — {price} ₽")
         blocks.append(
-            f"⌚ <b>{name}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
+            f"⌚ <b>{name}</b>\n"
+            f"<blockquote expandable>{_watch_block(groups[name])}</blockquote>"
         )
 
     header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
@@ -649,51 +629,139 @@ def _split_by_banner(category: str, header: str, blocks: List[tuple]) -> List[tu
     return out
 
 
-def _model_block(items: List[Dict]) -> str:
+def _variant_block(
+    items: List[Dict],
+    section_of,       # товар → значение раздела
+    section_sort,     # значение раздела → ключ сортировки
+    section_label,    # значение раздела → заголовок («» чтобы не рисовать)
+    shelf_of,         # товар → значение полки
+    shelf_sort,       # значение полки → ключ сортировки
+    line_of,          # (товар, значение полки) → текст строки
+) -> str:
     """
-    Содержимое блока одной модели: разделы по SIM, внутри — полки по памяти.
+    Содержимое блока одной модели: разделы, внутри — полки, между полками
+    пустая строка.
 
-    Так выглядит исходное сообщение поставщика, и так человек выбирает:
-    сначала решает, нужна ли физическая симка, потом сколько памяти,
-    и только в конце смотрит на цвет. Сплошной список из двух десятков
-    строк для этого не годится — в нём не видно границ.
+    Так человек и выбирает: сначала отсекает по главному признаку, потом
+    по второму, и только в конце смотрит на цвет. Сплошной список из двух
+    десятков строк для этого не годится — в нём не видно границ.
 
-    Разделы: сначала без физического слота (☁️), потом со слотом (📎).
-    Внутри раздела объёмы по возрастанию, между ними пустая строка.
+    Что играет роль раздела и полки, зависит от товара:
+      iPhone, iPad — SIM, затем объём памяти
+      Mac          — ОЗУ, затем накопитель
+      Apple Watch  — полок нет, разделы по размеру корпуса
+
+    Единственный безымянный раздел не рисуется: заголовок, который ничего
+    не разделяет, — лишний шум.
     """
     sections: Dict[str, List[Dict]] = defaultdict(list)
     for item in items:
-        sections[str(item.get("sim", "-")).strip() or "-"].append(item)
+        sections[section_of(item)].append(item)
 
-    # Единственный раздел без SIM (iPad без связи, старые записи) —
-    # заголовок не нужен, он не несёт информации.
-    hide_headers = len(sections) == 1 and next(iter(sections)) in ("-", "")
+    hide_headers = len(sections) == 1 and not section_label(next(iter(sections)))
 
     out: List[str] = []
-    for sim in sorted(sections, key=_sim_order):
+    for section in sorted(sections, key=section_sort):
         if not hide_headers:
-            label = _fmt_sim_marked(sim)
+            label = section_label(section)
             if label:
                 if out:
                     out.append("")
                 out.append(f"<b>{label}</b>")
 
-        by_memory: Dict[str, List[Dict]] = defaultdict(list)
-        for item in sections[sim]:
-            by_memory[str(item.get("memory", "-")).strip() or "-"].append(item)
+        shelves: Dict[str, List[Dict]] = defaultdict(list)
+        for item in sections[section]:
+            shelves[shelf_of(item)].append(item)
 
-        for n, mem in enumerate(sorted(by_memory, key=_memory_gb)):
+        for n, shelf in enumerate(sorted(shelves, key=shelf_sort)):
             if n:
-                out.append("")          # пустая строка между объёмами
-            for item in sorted(by_memory[mem], key=lambda x: x.get("color", "")):
-                color  = item.get("color", "-")
-                region = _fmt_region(item.get("region", "-"))
-                price  = _fmt_price(item.get("price", "0"))
-                parts  = [p for p in [mem, color, region] if p and p != "-"]
-                spec   = " | ".join(parts) if parts else "—"
-                out.append(f"• {spec} — {price} ₽")
+                out.append("")          # пустая строка между полками
+            for item in sorted(shelves[shelf], key=lambda x: x.get("color", "")):
+                out.append(line_of(item, shelf))
 
     return "\n".join(out)
+
+
+def _model_block(items: List[Dict]) -> str:
+    """iPhone и iPad: разделы по SIM, полки по объёму памяти."""
+    def line(item: Dict, mem: str) -> str:
+        color  = item.get("color", "-")
+        region = _fmt_region(item.get("region", "-"))
+        price  = _fmt_price(item.get("price", "0"))
+        parts  = [p for p in [mem, color, region] if p and p != "-"]
+        return f"• {' | '.join(parts) if parts else '—'} — {price} ₽"
+
+    return _variant_block(
+        items,
+        section_of=lambda i: str(i.get("sim", "-")).strip() or "-",
+        section_sort=_sim_order,
+        section_label=lambda s: "" if s in ("-", "") else _fmt_sim_marked(s),
+        shelf_of=lambda i: str(i.get("memory", "-")).strip() or "-",
+        shelf_sort=_memory_gb,
+        line_of=line,
+    )
+
+
+def _mac_chip_block(items: List[Dict]) -> str:
+    """
+    Mac: разделы по ОЗУ, полки по накопителю.
+
+    Размер и процессор покупатель уже выбрал — они в заголовке поста
+    и блока. Дальше решение то же по сути, что у iPhone: сколько
+    оперативки, потом сколько диска, и только потом цвет.
+    """
+    def line(item: Dict, mem: str) -> str:
+        color = item.get("color", "-")
+        price = _fmt_price(item.get("price", "0"))
+        parts = [p for p in [mem if mem != "-" else "", color] if p and p != "-"]
+        return f"• {' | '.join(parts) if parts else '—'} — {price} ₽"
+
+    def ram_label(ram: str) -> str:
+        return f"{ram} ГБ ОЗУ" if ram else ""
+
+    return _variant_block(
+        items,
+        section_of=lambda i: str(i.get("_ram", "")).strip(),
+        section_sort=lambda r: int(r) if r.isdigit() else 0,
+        section_label=ram_label,
+        shelf_of=lambda i: str(i.get("memory", "-")).strip() or "-",
+        shelf_sort=_memory_gb,
+        line_of=line,
+    )
+
+
+# Размер корпуса часов. Номер серии («AW 10», «Ultra 2») в этот набор
+# не попадает, поэтому спутать их нельзя.
+_WATCH_SIZE_RE = re.compile(r"\b(38|40|41|42|44|45|46|49)\s*(?:mm|мм)?\b", re.IGNORECASE)
+
+
+def _watch_block(items: List[Dict]) -> str:
+    """
+    Apple Watch: разделы по размеру корпуса.
+
+    Размер — первое, что человек выбирает в часах, и единственное,
+    что нельзя поменять потом. Полок внутри нет: дальше идут варианты
+    корпуса и ремешка, они уже в названии позиции.
+    """
+    def size_of(item: Dict) -> str:
+        text = str(item.get("title") or item.get("item_group_id", ""))
+        m = _WATCH_SIZE_RE.search(text)
+        return m.group(1) if m else ""
+
+    def line(item: Dict, _shelf: str) -> str:
+        title = item.get("title") or item.get("item_group_id", "")
+        price = _fmt_price(item.get("price", "0"))
+        return f"• {title} — {price} ₽"
+
+    return _variant_block(
+        items,
+        section_of=size_of,
+        section_sort=lambda s: int(s) if s.isdigit() else 99,
+        section_label=lambda s: f"{s} мм" if s else "",
+        shelf_of=lambda i: "",
+        shelf_sort=lambda s: 0,
+        line_of=line,
+    )
 
 
 def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
