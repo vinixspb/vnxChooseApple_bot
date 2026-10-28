@@ -24,10 +24,15 @@ def main():
         _get_category, _display_group, _format_category_messages,
         _category_keys, _CATEGORY_ORDER, _mac_line, _mac_split_ram,
     )
+    from services.sheets_manager import get_data_from_sheet
     from services import coming_soon
+    import services.data_store as store
     from collections import defaultdict
 
     print("🔗 Читаем каталог...")
+    # _catalog_items_for_publish() берёт каталог из памяти бота, а здесь
+    # отдельный процесс и память пустая. Поэтому сначала тянем из Sheets.
+    store.CATALOG = get_data_from_sheet()
     items = _catalog_items_for_publish()
     if not items:
         print("❌ Каталог пуст или Sheets недоступен")
