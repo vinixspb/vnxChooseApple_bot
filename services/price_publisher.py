@@ -14,6 +14,7 @@ from services import incidents
 from services import incident_rules as rules
 from services import banners
 from services import coming_soon
+from services import navigator
 
 logger = logging.getLogger(__name__)
 
@@ -928,7 +929,16 @@ def _build_plan(items: List[Dict]) -> List[Dict]:
                 plan.append({"kind": "photo", "banner": found,
                              "hash": _banner_digest(found)})
                 sent_banner = found[0]
-            plan.append({"kind": "text", "text": text,
+            # Якорь поста: сначала модель, поднятая своей картинкой,
+            # иначе вся категория. По нему кнопка навигатора найдёт пост.
+            own = banner_keys[0] if banner_keys else ""
+            if cat == "mac":
+                anchor = f"mac:{own}"
+            elif own and own not in _category_keys(cat):
+                anchor = f"group:{own}"
+            else:
+                anchor = f"cat:{cat}"
+            plan.append({"kind": "text", "text": text, "anchor": anchor,
                          "hash": channel_manager.digest(text), "cat": cat})
 
     # Анонсы — в самом конце, то есть внизу канала, на самом видном месте
@@ -941,6 +951,7 @@ def _build_plan(items: List[Dict]) -> List[Dict]:
                          "hash": _banner_digest(found)})
         text = coming_soon.format_post(entry, date_str)
         plan.append({"kind": "text", "text": text,
+                     "anchor": f"soon:{entry.get('key','')}",
                      "hash": channel_manager.digest(text), "cat": "coming_soon"})
 
     return plan
@@ -985,7 +996,8 @@ async def _apply_edits(bot: Bot, plan: List[Dict], slots: List[Dict]) -> tuple:
     for want, have in zip(plan, slots):
         msg_id = have["id"]
         if want["hash"] == have.get("hash"):
-            new_slots.append({"kind": want["kind"], "id": msg_id, "hash": want["hash"]})
+            new_slots.append({"kind": want["kind"], "id": msg_id,
+                              "hash": want["hash"], "anchor": want.get("anchor", "")})
             continue
 
         try:
@@ -1007,7 +1019,8 @@ async def _apply_edits(bot: Bot, plan: List[Dict], slots: List[Dict]) -> tuple:
             if "not modified" not in str(e).lower():
                 logger.warning(f"price_publisher: пост {msg_id} не отредактирован: {e}")
 
-        new_slots.append({"kind": want["kind"], "id": msg_id, "hash": want["hash"]})
+        new_slots.append({"kind": want["kind"], "id": msg_id,
+                          "hash": want["hash"], "anchor": want.get("anchor", "")})
 
     return new_slots, edited
 
@@ -1020,10 +1033,12 @@ async def _send_plan(bot: Bot, plan: List[Dict]) -> List[Dict]:
             if step["kind"] == "photo":
                 msg_id = await _send_banner(bot, step["banner"])
                 if msg_id:
-                    slots.append({"kind": "photo", "id": msg_id, "hash": step["hash"]})
+                    slots.append({"kind": "photo", "id": msg_id,
+                                  "hash": step["hash"], "anchor": ""})
             else:
                 msg = await _send_block(bot, step["text"])
-                slots.append({"kind": "text", "id": msg.message_id, "hash": step["hash"]})
+                slots.append({"kind": "text", "id": msg.message_id,
+                              "hash": step["hash"], "anchor": step.get("anchor", "")})
         except Exception as e:
             incidents.report(
                 component=rules.TELEGRAM,
@@ -1033,6 +1048,60 @@ async def _send_plan(bot: Bot, plan: List[Dict]) -> List[Dict]:
                 context={"канал": PRICE_CHANNEL_ID or "не задан"},
             )
     return slots
+
+
+async def _publish_navigator(bot: Bot, slots: List[Dict],
+                             previous_id: Optional[int]) -> Optional[int]:
+    """
+    Пост-навигатор идёт последним — в канале это самый низ, куда попадают
+    при открытии. Он же закрепляется, чтобы быть доступен из шапки.
+
+    Ссылки собираются из якорей уже отправленных постов, поэтому навигатор
+    создаётся после них. При следующей публикации он правится на месте.
+    """
+    if not navigator.enabled():
+        return previous_id
+
+    anchors = {s["anchor"]: s["id"] for s in slots if s.get("anchor")}
+
+    try:
+        me = await bot.get_me()
+        bot_username = me.username or ""
+    except Exception:
+        bot_username = ""
+
+    title, markup = navigator.build(PRICE_CHANNEL_ID, anchors, bot_username)
+    if not markup:
+        logger.info("navigator: ни одной рабочей кнопки — пост не публикуется")
+        return previous_id
+
+    if previous_id:
+        try:
+            await _send_throttled(lambda: bot.edit_message_text(
+                text=title, chat_id=PRICE_CHANNEL_ID, message_id=previous_id,
+                parse_mode="HTML", reply_markup=markup,
+            ))
+            return previous_id
+        except Exception as e:
+            if "not modified" in str(e).lower():
+                return previous_id
+            logger.warning(f"navigator: пост {previous_id} не обновлён ({e}), создаём заново")
+
+    try:
+        msg = await _send_throttled(lambda: bot.send_message(
+            PRICE_CHANNEL_ID, title, parse_mode="HTML",
+            reply_markup=markup, disable_notification=True,
+        ))
+        if navigator.config().get("pin"):
+            try:
+                await bot.pin_chat_message(PRICE_CHANNEL_ID, msg.message_id,
+                                           disable_notification=True)
+            except Exception as e:
+                logger.warning(f"navigator: не закреплён ({e})")
+        return msg.message_id
+    except Exception as e:
+        logger.warning(f"navigator: не отправлен: {e}")
+        return None
 
 
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
@@ -1075,7 +1144,10 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     if old_summary:
         await channel_manager.delete_messages(bot, PRICE_CHANNEL_ID, [old_summary])
 
-    channel_manager.save_manifest(slots, None)
+    # Навигатор знает ID разделов, поэтому идёт после них
+    nav_id = await _publish_navigator(bot, slots, manifest.get("nav_id"))
+
+    channel_manager.save_manifest(slots, None, nav_id)
 
     for cat in _CATEGORY_ORDER:
         incidents.ok(rules.TELEGRAM, "TG_FORBIDDEN", "TG_BAD_REQUEST",

@@ -47,27 +47,31 @@ def load_manifest() -> Dict:
     try:
         raw = json.loads(_IDS_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"version": _VERSION, "slots": [], "summary_id": None}
+        return {"version": _VERSION, "slots": [], "summary_id": None, "nav_id": None}
     except Exception as e:
         logger.warning(f"channel_manager: реестр не прочитан: {e}")
-        return {"version": _VERSION, "slots": [], "summary_id": None}
+        return {"version": _VERSION, "slots": [], "summary_id": None, "nav_id": None}
 
     if isinstance(raw, list):
         return {
             "version": _VERSION,
             "slots": [{"kind": "legacy", "id": i, "hash": ""} for i in raw],
             "summary_id": None,
+            "nav_id": None,
         }
     raw.setdefault("slots", [])
     raw.setdefault("summary_id", None)
+    raw.setdefault("nav_id", None)
     return raw
 
 
-def save_manifest(slots: List[Dict], summary_id: Optional[int] = None) -> None:
+def save_manifest(slots: List[Dict], summary_id: Optional[int] = None,
+                  nav_id: Optional[int] = None) -> None:
     try:
         _IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
         _IDS_FILE.write_text(
-            json.dumps({"version": _VERSION, "slots": slots, "summary_id": summary_id},
+            json.dumps({"version": _VERSION, "slots": slots,
+                        "summary_id": summary_id, "nav_id": nav_id},
                        ensure_ascii=False),
             encoding="utf-8",
         )

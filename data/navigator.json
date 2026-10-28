@@ -1,0 +1,43 @@
+{
+  "title": "🍏 <b>Навигация по прайсу</b>",
+  "pin": true,
+  "rows": [
+    [
+      {"text": "🔥 iPhone 18 Pro / Max / Duo",
+       "anchors": ["group:iphone18pro", "soon:iphone18pro", "soon:iphoneduo", "cat:iphone"]}
+    ],
+    [
+      {"text": "📱 iPhone 17 серия",
+       "anchors": ["group:iphone17", "group:iphone17pro", "group:iphoneair", "cat:iphone"]},
+      {"text": "📱 iPhone 16 / 15",
+       "anchors": ["group:iphone16", "group:iphone15", "cat:iphone"]}
+    ],
+    [
+      {"text": "💻 Mac",     "anchors": ["mac:macbookair13", "mac:macbookair15", "cat:mac"]},
+      {"text": "📲 iPad",    "anchors": ["cat:ipad"]},
+      {"text": "⌚ Watch",   "anchors": ["cat:watch"]},
+      {"text": "🎧 AirPods", "anchors": ["cat:audio"]}
+    ],
+    [
+      {"text": "⚡ Акции",            "start": "sale"},
+      {"text": "💬 Заказать / Бронь", "start": "order"}
+    ],
+    [
+      {"text": "✨ Индивидуальный подбор", "start": "ai"}
+    ]
+  ],
+  "_comment": [
+    "anchors — куда ведёт кнопка. Перебираются по порядку, берётся первый",
+    "существующий блок. Если не нашёлся ни один и нет start/url — кнопка",
+    "не рисуется: мёртвых ссылок в навигаторе быть не должно.",
+    "",
+    "Виды якорей:",
+    "  cat:<категория>  — пост категории (iphone, ipad, mac, watch, audio, accessory)",
+    "  group:<ключ>     — модель, поднятая в отдельный пост своей картинкой",
+    "  mac:<ключ>       — пост линейки Mac (macbookair13, macbookpro16, ...)",
+    "  soon:<ключ>      — анонс из data/coming_soon.json",
+    "",
+    "start — открывает бота с параметром, url — произвольная ссылка.",
+    "Какие якоря сейчас существуют, покажет python run_banner_audit.py"
+  ]
+}
