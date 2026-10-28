@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>vnxSHOP — каталог</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg:        var(--tg-theme-bg-color, #ffffff);
+    --card:      var(--tg-theme-secondary-bg-color, #f4f4f5);
+    --text:      var(--tg-theme-text-color, #16181c);
+    --muted:     var(--tg-theme-hint-color, #8b8e95);
+    --accent:    var(--tg-theme-button-color, #2f7cf6);
+    --on-accent: var(--tg-theme-button-text-color, #ffffff);
+    --line:      color-mix(in srgb, var(--muted) 22%, transparent);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: 24px;
+  }
+
+  .bar {
+    position: sticky; top: 0; z-index: 10; background: var(--bg);
+    padding: 10px 14px 6px; border-bottom: 1px solid var(--line);
+  }
+  .search {
+    width: 100%; padding: 11px 13px; border: 0; border-radius: 11px;
+    background: var(--card); color: var(--text); font-size: 16px;
+  }
+  .search::placeholder { color: var(--muted); }
+
+  .chips { display: flex; gap: 7px; overflow-x: auto; padding: 9px 0 3px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; padding: 7px 13px; border-radius: 999px; border: 0;
+    background: var(--card); color: var(--text); font-size: 14px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+
+  .wrap { padding: 12px 14px; }
+  .count { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+
+  .group {
+    background: var(--card); border-radius: 13px;
+    margin-bottom: 9px; overflow: hidden;
+  }
+  .group > summary {
+    list-style: none; cursor: pointer; padding: 13px 15px;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  .group > summary::-webkit-details-marker { display: none; }
+  .gname { font-weight: 600; flex: 1; }
+  .gfrom { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+  .variants { padding: 0 15px 6px; }
+  .shelf { color: var(--muted); font-size: 12px; margin: 10px 0 5px; letter-spacing: .02em; }
+  .row {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 9px 0; border: 0; border-top: 1px solid var(--line);
+    background: none; color: var(--text); text-align: left;
+    font: inherit; cursor: pointer;
+  }
+  .row:first-of-type { border-top: 0; }
+  .spec { flex: 1; min-width: 0; }
+  .spec b { font-weight: 500; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+  .price { font-weight: 600; white-space: nowrap; }
+
+  .empty { text-align: center; color: var(--muted); padding: 48px 20px; }
+  .err { padding: 16px; border-radius: 11px; background: var(--card); margin: 14px; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <input class="search" id="q" type="search" placeholder="Поиск: iPhone 17 Pro, 512, Silver…"
+         autocomplete="off" enterkeyhint="search">
+  <div class="chips" id="chips"></div>
+</div>
+
+<div class="wrap">
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const CATS = [
+  ["",          "Всё"],
+  ["iphone",    "iPhone"],
+  ["ipad",      "iPad"],
+  ["mac",       "Mac"],
+  ["watch",     "Watch"],
+  ["audio",     "Звук"],
+  ["accessory", "Аксессуары"],
+];
+
+let ITEMS = [], MANAGER = "", cat = "", query = "";
+
+const money = n => n.toLocaleString("ru-RU").replace(/,/g, " ") + " ₽";
+
+// «1TB» должен стоять после «512GB», а не между «128GB» и «256GB»
+function memWeight(m) {
+  const x = /^(\d+)\s*(GB|TB)?$/i.exec((m || "").trim());
+  if (!x) return 0;
+  return parseInt(x[1], 10) * (/tb/i.test(x[2] || "") ? 1024 : 1);
+}
+
+function render() {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = ITEMS.filter(i => {
+    if (cat && i.cat !== cat) return false;
+    if (!words.length) return true;
+    const hay = `${i.group} ${i.title} ${i.memory} ${i.color} ${i.sim}`.toLowerCase();
+    return words.every(w => hay.includes(w));
+  });
+
+  document.getElementById("count").textContent =
+    hits.length ? `${hits.length} позиций` : "";
+
+  const list = document.getElementById("list");
+  if (!hits.length) {
+    list.innerHTML = `<div class="empty">Ничего не нашлось.<br>Попробуйте короче — «17 Pro» или «512».</div>`;
+    return;
+  }
+
+  const groups = new Map();
+  for (const i of hits) {
+    if (!groups.has(i.group)) groups.set(i.group, []);
+    groups.get(i.group).push(i);
+  }
+
+  // Открываем группы сами, когда их мало: при поиске это экономит касание
+  const openAll = groups.size <= 3;
+  const frag = document.createDocumentFragment();
+
+  for (const [name, rows] of groups) {
+    rows.sort((a, b) =>
+      memWeight(a.memory) - memWeight(b.memory) ||
+      a.color.localeCompare(b.color));
+
+    const from = Math.min(...rows.map(r => r.price));
+    const d = document.createElement("details");
+    d.className = "group";
+    if (openAll) d.open = true;
+
+    const s = document.createElement("summary");
+    s.innerHTML = `<span class="gname"></span><span class="gfrom">от ${money(from)}</span>`;
+    s.querySelector(".gname").textContent = name;
+    d.appendChild(s);
+
+    const box = document.createElement("div");
+    box.className = "variants";
+    let shelf = null;
+    for (const r of rows) {
+      if (r.sim && r.sim !== shelf) {
+        shelf = r.sim;
+        const h = document.createElement("div");
+        h.className = "shelf";
+        h.textContent = shelf;
+        box.appendChild(h);
+      }
+      const b = document.createElement("button");
+      b.className = "row";
+      const spec = document.createElement("div");
+      spec.className = "spec";
+      const main = [r.memory, r.color].filter(Boolean).join(" · ") || r.title;
+      const sub  = [r.region].filter(Boolean).join(" · ");
+      spec.innerHTML = `<b></b>${sub ? `<div class="sub"></div>` : ""}`;
+      spec.querySelector("b").textContent = main;
+      if (sub) spec.querySelector(".sub").textContent = sub;
+      const p = document.createElement("div");
+      p.className = "price";
+      p.textContent = money(r.price);
+      b.append(spec, p);
+      b.onclick = () => order(name, r);
+      box.appendChild(b);
+    }
+    d.appendChild(box);
+    frag.appendChild(d);
+  }
+  list.replaceChildren(frag);
+}
+
+function order(group, item) {
+  tg?.HapticFeedback?.impactOccurred("light");
+  const what = [group, item.memory, item.color, item.sim].filter(Boolean).join(" ");
+  const text = `Здравствуйте! Интересует ${what} — ${money(item.price)}`;
+
+  // Закрываем приложение и передаём выбор боту: диалог продолжится в чате,
+  // где уже есть история и менеджер.
+  if (tg?.sendData) { tg.sendData(JSON.stringify({ id: item.id, text })); tg.close(); return; }
+  if (MANAGER) location.href = `https://t.me/${MANAGER}?text=${encodeURIComponent(text)}`;
+}
+
+function chips() {
+  const box = document.getElementById("chips");
+  box.replaceChildren(...CATS.map(([value, label]) => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = label;
+    b.setAttribute("aria-pressed", String(value === cat));
+    b.onclick = () => {
+      cat = value;
+      [...box.children].forEach(c =>
+        c.setAttribute("aria-pressed", String(c === b)));
+      render();
+    };
+    return b;
+  }));
+}
+
+document.getElementById("q").addEventListener("input", e => {
+  query = e.target.value;
+  render();
+});
+
+fetch("api/catalog")
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(d => {
+    ITEMS = d.items || [];
+    MANAGER = d.manager || "";
+    chips();
+    render();
+  })
+  .catch(() => {
+    document.getElementById("list").innerHTML =
+      `<div class="err">Каталог сейчас недоступен. Попробуйте чуть позже.</div>`;
+  });
+</script>
+</body>
+</html>

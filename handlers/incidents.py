@@ -338,3 +338,40 @@ async def cmd_banner_help(message: types.Message):
         "\n\n<i>Что уже стоит: /banners</i>",
         parse_mode="HTML",
     )
+
+
+@router.message(F.web_app_data)
+async def on_webapp_order(message: types.Message):
+    """
+    Заявка из Mini App.
+
+    Каталог закрывается и передаёт выбор сюда: дальше разговор идёт
+    в обычном чате, где уже есть история и где отвечает менеджер.
+    """
+    import json
+
+    raw = message.web_app_data.data if message.web_app_data else ""
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        payload = {"text": raw}
+
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return
+
+    await message.answer(
+        f"✅ Принято:\n\n<i>{_esc(text)}</i>\n\n"
+        f"Менеджер свяжется с вами. Если нужно что-то уточнить — просто напишите.",
+        parse_mode="HTML",
+    )
+
+    if MANAGER_ID:
+        user = message.from_user
+        await message.bot.send_message(
+            MANAGER_ID,
+            f"🛒 <b>Заявка из каталога</b>\n{_esc(text)}\n\n"
+            f"👤 {_esc(user.full_name)} "
+            f"(@{_esc(user.username or 'скрыт')}, id {user.id})",
+            parse_mode="HTML",
+        )

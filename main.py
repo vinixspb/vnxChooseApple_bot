@@ -18,7 +18,7 @@ from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
 from handlers import catalog, assistant, magic, group, channel, price_watcher
 from handlers import incidents as incidents_handler
 from handlers.catalog import load_all
-from services import incidents, watchdog, specs_db
+from services import incidents, watchdog, specs_db, webapp
 
 
 async def set_bot_commands(bot: Bot):
@@ -33,7 +33,19 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="banners", description="🖼 Картинки-шапки прайса"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+
+    # Кнопка меню открывает каталог, если Mini App настроен, иначе
+    # остаётся прежний список команд.
+    if webapp.enabled():
+        from aiogram.types import MenuButtonWebApp, WebAppInfo
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Каталог",
+                web_app=WebAppInfo(url=webapp.PUBLIC_URL),
+            )
+        )
+    else:
+        await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def main():
@@ -75,6 +87,7 @@ async def main():
     # Запускается до сторожа, чтобы результаты стартовой проверки было кому отправить.
     asyncio.create_task(incidents.dispatcher(bot))
     asyncio.create_task(watchdog.run())
+    asyncio.create_task(webapp.run())
 
     await dp.start_polling(bot)
 
