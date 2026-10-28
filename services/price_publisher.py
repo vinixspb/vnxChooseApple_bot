@@ -2,13 +2,14 @@ import logging
 import os
 import re
 from collections import defaultdict
+from pathlib import Path
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 
-from services.channel_manager import delete_old_price_messages, save_message_ids
+from services import channel_manager
 from services import incidents
 from services import incident_rules as rules
 from services import banners
@@ -899,86 +900,207 @@ async def _send_block(bot: Bot, text: str):
     )
 
 
-async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
+def _build_plan(items: List[Dict]) -> List[Dict]:
     """
-    Publishes items grouped by category in fixed order (iPhone last = most visible).
-    Deletes old messages first. All messages sent silently (disable_notification=True).
-    """
-    if not PRICE_CHANNEL_ID or not items:
-        return False
+    Весь прайс как последовательность постов, ещё ничего не отправляя.
 
+    Разделение «сначала решить, что публиковать, потом публиковать» нужно,
+    чтобы сравнить план с тем, что уже висит в канале, и поправить только
+    изменившееся.
+    """
     by_category: Dict[str, List[Dict]] = defaultdict(list)
     for item in items:
         by_category[_get_category(item)].append(item)
 
-    await delete_old_price_messages(bot, PRICE_CHANNEL_ID)
-
-    new_ids: List[int] = []
+    plan: List[Dict] = []
 
     for cat in _CATEGORY_ORDER:
         cat_items = by_category.get(cat, [])
         if not cat_items:
             continue
         blocks = _format_category_messages(cat, cat_items)
-        # Mac отдаёт пары (текст, ключи баннера), остальные категории —
-        # просто текст с ключом по имени категории.
         if blocks and not isinstance(blocks[0], tuple):
             blocks = [(t, _category_keys(cat)) for t in blocks]
 
         sent_banner: str | None = None
         for text, banner_keys in blocks:
-            # Баннер идёт отдельным сообщением перед блоком, его message_id
-            # попадает в тот же список — при следующей публикации он удалится
-            # вместе с прайсом, и картинки не будут копиться в канале.
             found = banners.resolve(banner_keys)
             if found and found[0] != sent_banner:
-                banner_id = await _send_banner(bot, found)
-                if banner_id:
-                    new_ids.append(banner_id)
-                    sent_banner = found[0]
+                plan.append({"kind": "photo", "banner": found,
+                             "hash": _banner_digest(found)})
+                sent_banner = found[0]
+            plan.append({"kind": "text", "text": text,
+                         "hash": channel_manager.digest(text), "cat": cat})
 
-            try:
-                msg = await _send_block(bot, text)
-                new_ids.append(msg.message_id)
-            except Exception as e:
-                incidents.report(
-                    component=rules.TELEGRAM,
-                    exc=e,
-                    detail=f"Сообщение категории '{cat}' не отправлено в канал",
-                    key=cat,
-                    context={
-                        "канал":  PRICE_CHANNEL_ID or "не задан",
-                        "длина":  len(text),
-                    },
-                )
-
-    # Анонсы — в самом конце, то есть внизу канала, на самом видном месте.
-    # Модель, уже появившаяся в наличии, из анонсов выпадает сама.
+    # Анонсы — в самом конце, то есть внизу канала, на самом видном месте
     date_str = datetime.now(_MSK).strftime("%d.%m.%Y")
     in_stock_groups = [str(i.get("item_group_id", "")) for i in items]
     for entry in coming_soon.pending(in_stock_groups):
         found = banners.resolve([entry.get("key", "")])
         if found:
-            banner_id = await _send_banner(bot, found)
-            if banner_id:
-                new_ids.append(banner_id)
+            plan.append({"kind": "photo", "banner": found,
+                         "hash": _banner_digest(found)})
+        text = coming_soon.format_post(entry, date_str)
+        plan.append({"kind": "text", "text": text,
+                     "hash": channel_manager.digest(text), "cat": "coming_soon"})
+
+    return plan
+
+
+def _banner_digest(found: tuple) -> str:
+    """
+    Отпечаток картинки. Для файла учитываем размер и время правки —
+    перерисованный баннер под тем же именем должен считаться изменением.
+    """
+    key, kind, value = found
+    if kind == "file":
         try:
-            msg = await _send_block(bot, coming_soon.format_post(entry, date_str))
-            new_ids.append(msg.message_id)
+            st = Path(str(value)).stat()
+            return channel_manager.digest(f"{key}|{st.st_size}|{int(st.st_mtime)}")
+        except OSError:
+            pass
+    return channel_manager.digest(f"{key}|{value}")
+
+
+def _same_shape(plan: List[Dict], slots: List[Dict]) -> bool:
+    """
+    Можно ли править на месте.
+
+    Telegram не умеет вставлять сообщение между существующими и не умеет
+    превращать фото в текст. Поэтому править можно, только если
+    последовательность типов совпала один в один; иначе честнее
+    пересоздать всё разом.
+    """
+    if len(plan) != len(slots):
+        return False
+    return all(p["kind"] == s.get("kind") for p, s in zip(plan, slots))
+
+
+async def _apply_edits(bot: Bot, plan: List[Dict], slots: List[Dict]) -> tuple:
+    """Правит на месте только то, что изменилось. Возвращает (слоты, сколько правок)."""
+    from aiogram.types import FSInputFile, InputMediaPhoto
+
+    new_slots: List[Dict] = []
+    edited = 0
+
+    for want, have in zip(plan, slots):
+        msg_id = have["id"]
+        if want["hash"] == have.get("hash"):
+            new_slots.append({"kind": want["kind"], "id": msg_id, "hash": want["hash"]})
+            continue
+
+        try:
+            if want["kind"] == "text":
+                await _send_throttled(lambda: bot.edit_message_text(
+                    text=want["text"], chat_id=PRICE_CHANNEL_ID,
+                    message_id=msg_id, parse_mode="HTML",
+                ))
+            else:
+                key, kind, value = want["banner"]
+                media = FSInputFile(str(value)) if kind == "file" else str(value)
+                await _send_throttled(lambda: bot.edit_message_media(
+                    media=InputMediaPhoto(media=media),
+                    chat_id=PRICE_CHANNEL_ID, message_id=msg_id,
+                ))
+            edited += 1
+        except Exception as e:
+            # «message is not modified» — значит содержимое и так совпадает
+            if "not modified" not in str(e).lower():
+                logger.warning(f"price_publisher: пост {msg_id} не отредактирован: {e}")
+
+        new_slots.append({"kind": want["kind"], "id": msg_id, "hash": want["hash"]})
+
+    return new_slots, edited
+
+
+async def _send_plan(bot: Bot, plan: List[Dict]) -> List[Dict]:
+    """Отправляет весь прайс заново — когда структура изменилась."""
+    slots: List[Dict] = []
+    for step in plan:
+        try:
+            if step["kind"] == "photo":
+                msg_id = await _send_banner(bot, step["banner"])
+                if msg_id:
+                    slots.append({"kind": "photo", "id": msg_id, "hash": step["hash"]})
+            else:
+                msg = await _send_block(bot, step["text"])
+                slots.append({"kind": "text", "id": msg.message_id, "hash": step["hash"]})
         except Exception as e:
             incidents.report(
                 component=rules.TELEGRAM,
                 exc=e,
-                detail=f"Анонс «{entry.get('title')}» не отправлен в канал",
-                key="coming_soon",
+                detail=f"Блок «{step.get('cat', 'баннер')}» не отправлен в канал",
+                key=str(step.get("cat", "banner")),
+                context={"канал": PRICE_CHANNEL_ID or "не задан"},
             )
+    return slots
 
-    if new_ids:
-        save_message_ids(new_ids)
-        logger.info(f"price_publisher: {len(new_ids)} сообщений, {len(items)} позиций")
-        # Публикация прошла — гасим инциденты доставки в канал
-        for cat in _CATEGORY_ORDER:
-            incidents.ok(rules.TELEGRAM, "TG_FORBIDDEN", "TG_BAD_REQUEST",
-                         "TG_RATE_LIMIT", "TG_NETWORK", key=cat)
-        return True
-    return False
+
+async def _publish_summary(bot: Bot, previous_id: Optional[int],
+                           items_count: int) -> Optional[int]:
+    """
+    Одно итоговое сообщение вместо потока.
+
+    Прошлое удаляется, чтобы итоги не копились в канале лентой.
+    Подписчик видит ровно одно новое сообщение за обновление — это и есть
+    сигнал «прайс посмотрели и обновили».
+    """
+    if previous_id:
+        await channel_manager.delete_messages(bot, PRICE_CHANNEL_ID, [previous_id])
+
+    date_str = datetime.now(_MSK).strftime("%d.%m.%Y, %H:%M")
+    text = (f"🔄 <b>Прайс обновлён</b> — {date_str}\n"
+            f"Позиций в наличии: {items_count}")
+    try:
+        msg = await _send_block(bot, text)
+        return msg.message_id
+    except Exception as e:
+        logger.warning(f"price_publisher: итоговое сообщение не отправлено: {e}")
+        return None
+
+
+async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
+    """
+    Публикует прайс, по возможности правя существующие посты на месте.
+
+    Редактирование не создаёт ни уведомления, ни непрочитанного, поэтому
+    обычное обновление цен проходит для подписчиков незаметно. Пересоздание
+    остаётся только на случай, когда изменился сам состав постов.
+    """
+    if not PRICE_CHANNEL_ID or not items:
+        return False
+
+    plan = _build_plan(items)
+    if not plan:
+        return False
+
+    manifest = channel_manager.load_manifest()
+    slots = manifest.get("slots", [])
+
+    if _same_shape(plan, slots):
+        slots, edited = await _apply_edits(bot, plan, slots)
+        logger.info(
+            f"price_publisher: правка на месте — изменено {edited} из {len(plan)} постов"
+        )
+    else:
+        if slots:
+            await channel_manager.delete_old_price_messages(bot, PRICE_CHANNEL_ID)
+        slots = await _send_plan(bot, plan)
+        edited = len(slots)
+        logger.info(f"price_publisher: структура изменилась, отправлено {len(slots)} постов")
+
+    if not slots:
+        return False
+
+    # Ничего не изменилось — и сообщать не о чем. «Прайс обновлён» без
+    # единой правки это ровно тот шум, от которого мы уходим.
+    summary_id = manifest.get("summary_id")
+    if edited:
+        summary_id = await _publish_summary(bot, summary_id, len(items))
+
+    channel_manager.save_manifest(slots, summary_id)
+
+    for cat in _CATEGORY_ORDER:
+        incidents.ok(rules.TELEGRAM, "TG_FORBIDDEN", "TG_BAD_REQUEST",
+                     "TG_RATE_LIMIT", "TG_NETWORK", key=cat)
+    return True
