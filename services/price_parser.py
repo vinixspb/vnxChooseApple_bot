@@ -22,8 +22,12 @@ _APPLE_MODEL_RE = re.compile(
     r"Duo\b|"            # iPhone Duo shorthand (складной, сентябрь 2026)
     r"Pro\s+M\d|"        # iPad Pro M4/M5
     r"Pro\s+Max|"        # iPhone Pro Max shorthand
-    r"1[5-9](?:\s|$)|"  # iPhone 15, 16, 17, 18, 19
-    r"2\d(?:\s|$)"       # iPhone 20+
+    # iPhone 15, 16, 17, 18, 19 и 20+, записанные без слова iPhone.
+    # Буква «e» сразу после номера — доступная модель поколения (16e, 17e).
+    # Без неё граница по пробелу не срабатывала, и сокращённое «16e 128
+    # Black» уходило в Unknown, то есть терялось молча.
+    r"1[5-9]e?(?:\s|$)|"
+    r"2\de?(?:\s|$)"
     r")", re.IGNORECASE
 )
 
@@ -310,8 +314,11 @@ def parse_price_list(text: str) -> List[Dict]:
             suffix = re.sub(r"^Pro\s+", "", model_part, flags=re.IGNORECASE).strip()
             model_name = "iPad Pro " + suffix
 
-        elif re.match(r"^1[5-9](\s|$)", model_part) or re.match(r"^2\d(\s|$)", model_part):
-            # "17 128" → "iPhone 17", "16 Pro Max" → "iPhone 16 Pro Max"
+        elif re.match(r"^1[5-9]e?(\s|$)", model_part) or re.match(r"^2\de?(\s|$)", model_part):
+            # "17 128" → "iPhone 17", "16 Pro Max" → "iPhone 16 Pro Max",
+            # "16e 128" → "iPhone 16e". Слово iPhone обязательно: без него
+            # в таблице появилась бы группа «16e» рядом с «iPhone 16e»
+            # от поставщиков, пишущих название целиком.
             model_name = "iPhone " + model_part
 
         elif re.match(r"^Air$", model_part.strip(), re.IGNORECASE):

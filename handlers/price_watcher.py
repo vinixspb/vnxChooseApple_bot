@@ -98,6 +98,58 @@ _BRAND_ANYWHERE_PUB_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Чужой прайс целиком ──────────────────────────────────────────────────────
+# Многобрендовые поставщики («BORODA SAMSUNG / MULTI-BRAND») присылают в ту же
+# группу прайсы на LEGO, дроны, приставки. looks_like_price_list() смотрит
+# только на форму строк — «название — число», — поэтому такое сообщение
+# проходит фильтр, парсер законно возвращает ноль Apple-позиций, и рождается
+# инцидент PARSE_EMPTY. При каждом прайсе от такого поставщика.
+#
+# Инцидент должен значить «прайс Apple пришёл, а мы его не поняли». Поэтому
+# перед тревогой проверяем, был ли в сообщении наш товар вообще.
+#
+# Признак именно отрицательный — по чужим брендам, а не по слову «Apple».
+# Поставщики пишут Apple сокращённо и без названия бренда («Duo 256 Star
+# White eSim+eSim»), так что отсутствие слова «iPhone» ещё ни о чём не
+# говорит, а вот слово «LEGO» говорит вполне.
+_FOREIGN_GOODS_RE = re.compile(
+    r"\b(LEGO|Лего|Dyson|Playstation|PS[45]\b|Xbox|Nintendo|Kindle|"
+    r"Meta\s+Quest|Quest\s*[23]\b|Электросамокат|Самокат|Пылесос)\b",
+    re.IGNORECASE,
+)
+
+# Строка с ценой — та же форма, по которой прайс опознаёт price_parser.
+_PRICE_LINE_RE = re.compile(r"-\s*\d{3,}\s*$")
+
+# Упоминание Apple где угодно в сообщении. Нужно только как страховка:
+# если оно есть, молчать нельзя даже при полном разборе в ноль.
+_APPLE_MENTION_RE = re.compile(
+    r"\b(apple|iphone|ipad|ipod|imac|macbook|airpods?|airtag|homepod|"
+    r"magsafe|mac\s*(?:mini|studio|pro|book)|watch\s*(?:ultra|se|series))\b",
+    re.IGNORECASE,
+)
+
+_FOREIGN_SHARE = 0.6
+
+
+def _is_foreign_price_list(text: str) -> bool:
+    """Прайс не про наш товар: чужие бренды в строках и ни слова об Apple."""
+    if _APPLE_MENTION_RE.search(text):
+        return False
+
+    lines = [ln for ln in text.splitlines() if _PRICE_LINE_RE.search(ln)]
+    if not lines:
+        return False
+
+    foreign = sum(
+        1 for ln in lines
+        if _FOREIGN_GOODS_RE.search(ln)
+        or _BRAND_ANYWHERE_PUB_RE.search(ln)
+        or _NON_APPLE_PUB_RE.match(ln.strip())
+        or _NON_TECH_PUB_RE.search(ln)
+    )
+    return foreign >= _FOREIGN_SHARE * len(lines)
+
 # Запись ОЗУ через дробь: "8/ 256GB", "16/ 1TB". Так поставщики оформляют
 # Honor и Xiaomi, замаскированные под Apple. Сама Apple объём ОЗУ
 # в названии товара не указывает никогда.
@@ -335,6 +387,13 @@ async def _process_price_message(message: types.Message) -> None:
 
     raw_items = parse_price_list(text)
     if not raw_items:
+        # Чужой товар — это не сбой. Гасим инцидент, если он остался
+        # с прошлых таких же сообщений, и молчим.
+        if _is_foreign_price_list(text):
+            logger.info(f"price_watcher: прайс из '{source}' не про Apple — пропуск")
+            incidents.resolve(rules.PARSER, "PARSE_EMPTY", key=source)
+            return
+
         # Сообщение прошло фильтр looks_like_price_list, но парсер ничего не понял.
         # Почти всегда это смена формата у поставщика — молча терять такое нельзя.
         incidents.report(
