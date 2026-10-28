@@ -114,9 +114,13 @@ _MAC_PUB_RE = re.compile(r"\b(macbook|imac|mac\s*mini|mac\s*studio|mac\s*pro|mac
 # В канале это выглядело как отдельный товар «📱 eSim — 28 700 ₽»,
 # без памяти и цвета. Такую строку показывать покупателю нельзя:
 # что это за товар, не понимает никто, включая нас.
+#
+# Прежний список перечислял сочетания вручную и не знал «eSim+eSim»,
+# которое появилось вместе с iPhone Duo. Теперь любое слово о связи,
+# в любой комбинации через плюс, — обломок.
+_SIM_WORD = r"(?:e-?sim|nano|wi-?fi|lte|dual\s*sim|sim)"
 _JUNK_GROUP_RE = re.compile(
-    r"^\s*(e-?sim|nano\s*\+?\s*e-?sim|nano\s*\+?\s*nano|nano|wi-?fi|lte|"
-    r"dual\s*sim|sim|-)\s*$",
+    rf"^\s*(?:{_SIM_WORD}(?:\s*\+\s*{_SIM_WORD})*|-)\s*$",
     re.IGNORECASE,
 )
 
@@ -212,6 +216,13 @@ def _catalog_items_for_publish() -> list[dict]:
         item = dict(row)
         raw_group = row.get("model_group") or row.get("title", "")
         item["item_group_id"] = _normalize_group(raw_group)
+
+        # Проверку на обломок разбора делаем здесь, а не в _is_apple_product:
+        # та смотрит на колонку листа, а в канал уходит имя из model_group.
+        # Из-за этого «eSim» проходил фильтр и вылезал в прайсе отдельным
+        # блоком «iPhone eSim» — товаром, которого не существует.
+        if _JUNK_GROUP_RE.match(item["item_group_id"]):
+            continue
 
         # Backfill SIM from ID for old rows with empty sim field
         sim = str(item.get("sim", "")).strip()

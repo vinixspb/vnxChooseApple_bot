@@ -23,6 +23,7 @@ def main():
     from services.price_publisher import (
         _get_category, _display_group, _format_category_messages,
         _category_keys, _CATEGORY_ORDER, _mac_line, _mac_split_ram,
+        _group_key,
     )
     from services.sheets_manager import get_data_from_sheet
     from services import coming_soon
@@ -74,8 +75,14 @@ def main():
         elif cat in ("iphone", "ipad"):
             # Картинка группы не обязательна: без неё группа едет в общем
             # посте категории. Своя картинка поднимает её в отдельный пост.
-            groups = sorted({_display_group(cat, str(i.get("item_group_id", "")))
-                             for i in cat_items})
+            # Группируем ровно как публикация: по ключу без регистра,
+            # имя берём наименьшее из написаний. Иначе аудит посоветует
+            # два файла там, где в канале один блок.
+            spellings = defaultdict(list)
+            for i in cat_items:
+                raw = str(i.get("item_group_id") or "").strip() or "Другое"
+                spellings[_group_key(raw)].append(raw)
+            groups = sorted(_display_group(cat, min(v)) for v in spellings.values())
             cat_banner = banners.resolve(_category_keys(cat))
             rows.append((cat, _CATEGORY_TITLE_RU.get(cat, cat) + " (общая)",
                          source(cat_banner), _category_keys(cat)[0], True))

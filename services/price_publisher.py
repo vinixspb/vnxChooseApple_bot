@@ -213,6 +213,43 @@ def _mac_year(group_name: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+# Поставщики пишут одно и то же разным регистром: «iPad AIR M3 11 2025»
+# и «iPad Air M3 11 2025», «iPad Mini 7» и «iPad mini 7». Для словаря это
+# разные ключи, и модель разъезжалась в канале на два блока с разными
+# ценами — покупатель видел два прайса на один товар.
+#
+# Поэтому группируем по ключу без регистра, а показываем одно написание —
+# то, которым пользуется сама Apple: «iPad mini», «MacBook Air», «eSIM».
+_APPLE_WORDS: Dict[str, str] = {
+    "iphone": "iPhone", "ipad": "iPad", "ipod": "iPod", "imac": "iMac",
+    "macbook": "MacBook", "mac": "Mac",
+    "air": "Air", "pro": "Pro", "max": "Max", "plus": "Plus",
+    "mini": "mini", "ultra": "Ultra", "studio": "Studio", "neo": "Neo",
+    "se": "SE", "duo": "Duo",
+    "esim": "eSIM", "nano": "Nano", "wifi": "WiFi", "lte": "LTE",
+}
+
+_CHIP_WORD_RE = re.compile(r"^m(\d)$", re.IGNORECASE)
+
+
+def _group_key(name: str) -> str:
+    """Ключ группировки: регистр и лишние пробелы не должны плодить блоки."""
+    return re.sub(r"\s+", " ", str(name)).strip().casefold()
+
+
+def _canonical_group(name: str) -> str:
+    """Единое написание имени группы. Незнакомое слово оставляем как есть."""
+    out: List[str] = []
+    for word in re.sub(r"\s+", " ", str(name)).strip().split(" "):
+        canon = _APPLE_WORDS.get(word.casefold())
+        if canon:
+            out.append(canon)
+            continue
+        chip = _CHIP_WORD_RE.match(word)
+        out.append(f"M{chip.group(1)}" if chip else word)
+    return " ".join(out)
+
+
 def _display_group(category: str, group_name: str) -> str:
     """
     Имя группы для заголовка блока.
@@ -221,7 +258,7 @@ def _display_group(category: str, group_name: str) -> str:
     снимается при нормализации, и в канале оставался голый номер.
     Возвращаем слово iPhone на место: покупателю «11» ни о чём не говорит.
     """
-    name = str(group_name).strip()
+    name = _canonical_group(group_name)
     if category == "iphone" and "iphone" not in name.lower():
         return f"iPhone {name}"
     return name
@@ -781,9 +818,16 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
     if category in _GROUPED_CATEGORIES:
         group_emoji = _GROUP_EMOJI.get(category, "")
 
+        # Ключ — имя без регистра, иначе «iPad AIR» и «iPad Air» дают два
+        # блока. Написаний у одной группы может быть несколько; берём
+        # наименьшее, чтобы заголовок не прыгал от публикации к публикации.
         groups: Dict[str, List[Dict]] = defaultdict(list)
+        spellings: Dict[str, List[str]] = defaultdict(list)
         for item in items:
-            groups[item.get("item_group_id", "Другое")].append(item)
+            raw = str(item.get("item_group_id") or "").strip() or "Другое"
+            key = _group_key(raw)
+            groups[key].append(item)
+            spellings[key].append(raw)
 
         # iPhone: sort by generation→tier; iPad/Mac: alphabetically
         if category == "iphone":
@@ -792,12 +836,12 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
             sorted_groups = sorted(groups)
 
         blocks = []
-        for group_name in sorted_groups:
-            display_name = _display_group(category, group_name)
+        for key in sorted_groups:
+            display_name = _display_group(category, min(spellings[key]))
             blocks.append((
                 display_name,
                 f"{group_emoji} <b>{display_name}</b>\n"
-                f"<blockquote expandable>{_model_block(groups[group_name])}</blockquote>"
+                f"<blockquote expandable>{_model_block(groups[key])}</blockquote>"
             ))
 
         header = f"🍏 <b>Актуальный прайс — {date_str}</b>"
