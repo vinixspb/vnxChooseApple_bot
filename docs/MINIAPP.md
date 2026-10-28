@@ -24,56 +24,90 @@
 Telegram открывает Mini App **только по HTTPS** и только по адресу из
 настроек. Поэтому нужен поддомен с сертификатом.
 
+Адрес проекта: **`apple.vnxoracle.uk`**.
+
 ### 1. Поддомен
 
-Заведите, например, `shop.вашдомен` → A-запись на IP сервера.
+A-запись `apple.vnxoracle.uk` → IP сервера. Проверка, что запись доехала
+и указывает туда же, где стоит бот:
+
+```bash
+dig +short apple.vnxoracle.uk
+curl -s ifconfig.me; echo
+```
+
+Два адреса должны совпасть. Если домен за Cloudflare, на время выпуска
+сертификата оставьте запись серой (DNS only) — так проверка Let's Encrypt
+дойдёт до нашего nginx напрямую, без посредника.
 
 ### 2. nginx
 
+Сначала обычный HTTP — сертификата ещё нет, а получить его без рабочего
+сайта нельзя. Файл `/etc/nginx/sites-available/apple.vnxoracle.uk`:
+
 ```nginx
 server {
-    listen 443 ssl http2;
-    server_name shop.вашдомен;
-
-    ssl_certificate     /etc/letsencrypt/live/shop.вашдомен/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/shop.вашдомен/privkey.pem;
+    listen 80;
+    listen [::]:80;
+    server_name apple.vnxoracle.uk;
 
     location / {
         proxy_pass http://127.0.0.1:8081;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-Сертификат:
+```bash
+ln -s /etc/nginx/sites-available/apple.vnxoracle.uk /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+```
+
+### 3. Сертификат
 
 ```bash
-certbot --nginx -d shop.вашдомен
+certbot --nginx -d apple.vnxoracle.uk
 ```
 
-### 3. Переменные в `.env`
+Certbot сам допишет блок на 443 и редирект с 80. Если плагина нет:
+`apt install python3-certbot-nginx`.
+
+### 4. Переменные в `.env`
 
 ```
-WEBAPP_URL=https://shop.вашдомен
+WEBAPP_URL=https://apple.vnxoracle.uk
 MANAGER_USERNAME=vnxshop
 ```
 
 `WEBAPP_PORT` по умолчанию 8081, `WEBAPP_HOST` — 127.0.0.1: наружу сервер
 не смотрит, его публикует только nginx.
 
-### 4. Перезапуск
+Порт занят соседним проектом — поменяйте `WEBAPP_PORT` и `proxy_pass`
+вместе, они должны совпадать. Кто слушает порт: `ss -lntp | grep 8081`.
+
+### 5. Перезапуск
 
 ```bash
-cd /opt/vnxChooseApple_bot && git pull origin claude/funny-shannon-bMuuR && apple-restart
+cd /opt/vnxChooseApple_bot && apple-restart
 ```
 
-### 5. Проверка
+В логе должно появиться `webapp: слушает 127.0.0.1:8081, публичный адрес
+https://apple.vnxoracle.uk` вместо прежнего «WEBAPP_URL не задан».
+
+### 6. Проверка
 
 ```bash
 curl -s http://127.0.0.1:8081/health
-curl -s https://shop.вашдомен/api/catalog | head -c 300
+curl -s https://apple.vnxoracle.uk/health
+curl -s https://apple.vnxoracle.uk/api/catalog | head -c 300
 ```
+
+Первая проверка — что поднялся сам сервер, вторая — что его видно снаружи
+по сертификату, третья — что каталог отдаётся. Пустой список в третьей
+значит, что бот ещё не прочитал таблицу: подождите или посмотрите логи.
 
 Затем в боте нажмите кнопку меню слева от поля ввода — должен открыться
 каталог.
@@ -88,8 +122,11 @@ https://t.me/vnxSHOP_AppleFinder_bot/shop
 ```
 
 Для короткой ссылки такого вида Mini App нужно зарегистрировать у
-@BotFather: `/newapp` → выбрать бота → указать `WEBAPP_URL` и короткое имя
-`shop`. Кнопка меню работает и без этого шага.
+@BotFather: `/newapp` → выбрать бота → указать `https://apple.vnxoracle.uk`
+и короткое имя `shop`. Кнопка меню работает и без этого шага.
+
+Такую ссылку можно поставить кнопкой в навигатор — обычным `url`
+в `data/navigator.json`, якорь для неё не нужен.
 
 ## Как это выглядит для покупателя
 

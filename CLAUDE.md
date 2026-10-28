@@ -103,6 +103,8 @@ touch /opt/vnxChooseApple_bot/data/publish_now.flag
 
 Каталог внутри Telegram: поиск, фильтры, заказ. Документация — `docs/MINIAPP.md`.
 
+Адрес: `https://apple.vnxoracle.uk` → nginx → `127.0.0.1:8081`.
+
 Включается переменной `WEBAPP_URL` в `.env`. Пока её нет, сервер не
 поднимается и кнопка не появляется — остальное работает как прежде.
 Нужен поддомен с сертификатом: Telegram открывает Mini App только по HTTPS.
