@@ -553,8 +553,9 @@ def _format_subgrouped(category: str, items: List[Dict]) -> List[tuple]:
             f"<b>{key}</b>\n<blockquote expandable>{chr(10).join(lines)}</blockquote>"
         )
 
-    header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
-              f"<b>{_CATEGORY_TITLE.get(category, category)}</b>")
+    # Название категории убрано: оно дублировало заголовок блока
+    # под ним — «📱 iPhone» над «📱 iPhone Duo» ничего не добавляло.
+    header = f"🍏 <b>Актуальный прайс — {date_str}</b>"
     return [(t, _category_keys(category)) for t in _pack_blocks(header, blocks)]
 
 
@@ -594,8 +595,7 @@ def _format_watch_messages(items: List[Dict], category: str = "watch") -> List[t
             f"<blockquote expandable>{_watch_block(groups[name])}</blockquote>"
         )
 
-    header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
-              f"<b>{_CATEGORY_TITLE['watch']}</b>")
+    header = f"🍏 <b>Актуальный прайс — {date_str}</b>"
     return [(t, _category_keys(category)) for t in _pack_blocks(header, blocks)]
 
 
@@ -799,8 +799,7 @@ def _format_category_messages(category: str, items: List[Dict]) -> List[tuple]:
                 f"<blockquote expandable>{_model_block(groups[group_name])}</blockquote>"
             ))
 
-        header = (f"🍏 <b>Актуальный прайс — {date_str}</b>\n"
-                  f"<b>{_CATEGORY_TITLE.get(category, category)}</b>")
+        header = f"🍏 <b>Актуальный прайс — {date_str}</b>"
         return _split_by_banner(category, header, blocks)
 
     # Подстраховка: категория без своего оформления выходит плоским списком.
@@ -1036,29 +1035,6 @@ async def _send_plan(bot: Bot, plan: List[Dict]) -> List[Dict]:
     return slots
 
 
-async def _publish_summary(bot: Bot, previous_id: Optional[int],
-                           items_count: int) -> Optional[int]:
-    """
-    Одно итоговое сообщение вместо потока.
-
-    Прошлое удаляется, чтобы итоги не копились в канале лентой.
-    Подписчик видит ровно одно новое сообщение за обновление — это и есть
-    сигнал «прайс посмотрели и обновили».
-    """
-    if previous_id:
-        await channel_manager.delete_messages(bot, PRICE_CHANNEL_ID, [previous_id])
-
-    date_str = datetime.now(_MSK).strftime("%d.%m.%Y, %H:%M")
-    text = (f"🔄 <b>Прайс обновлён</b> — {date_str}\n"
-            f"Позиций в наличии: {items_count}")
-    try:
-        msg = await _send_block(bot, text)
-        return msg.message_id
-    except Exception as e:
-        logger.warning(f"price_publisher: итоговое сообщение не отправлено: {e}")
-        return None
-
-
 async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     """
     Публикует прайс, по возможности правя существующие посты на месте.
@@ -1092,13 +1068,14 @@ async def publish_price(bot: Bot, items: List[Dict], source: str = "") -> bool:
     if not slots:
         return False
 
-    # Ничего не изменилось — и сообщать не о чем. «Прайс обновлён» без
-    # единой правки это ровно тот шум, от которого мы уходим.
-    summary_id = manifest.get("summary_id")
-    if edited:
-        summary_id = await _publish_summary(bot, summary_id, len(items))
+    # Итогового «Прайс обновлён» больше нет: дата и так стоит в каждом
+    # блоке, а отдельное сообщение было единственным, что ещё создавало
+    # непрочитанное при каждом обновлении. Старое удаляем, если осталось.
+    old_summary = manifest.get("summary_id")
+    if old_summary:
+        await channel_manager.delete_messages(bot, PRICE_CHANNEL_ID, [old_summary])
 
-    channel_manager.save_manifest(slots, summary_id)
+    channel_manager.save_manifest(slots, None)
 
     for cat in _CATEGORY_ORDER:
         incidents.ok(rules.TELEGRAM, "TG_FORBIDDEN", "TG_BAD_REQUEST",
